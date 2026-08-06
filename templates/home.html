@@ -3,69 +3,66 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Tecnibo - Fiche Technique</title>
-
-  <!-- CSS -->
+  <title>Tecnibo - Plan Principe</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='home.css') }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='editor.css') }}">
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
-
-  <style>
-    .image-preview-container {
-      position: relative;
-      display: inline-block;
-    }
-
-    .delete-image-btn {
-      position: absolute;
-      top: 5px;
-      right: 5px;
-      background: #dc3545;
-      color: #fff;
-      border: none;
-      border-radius: 50%;
-      width: 30px;
-      height: 30px;
-      cursor: pointer;
-      font-size: 16px;
-      display: none;
-      z-index: 10;
-      box-shadow: 0 2px 5px rgba(0,0,0,0.3);
-    }
-
-    .delete-image-btn:hover { background: #c82333; }
-    .image-preview-container:hover .delete-image-btn { display: block; }
-    .preview.deleted { opacity: 0.3; filter: grayscale(100%); }
-  </style>
 </head>
 <body>
 
   <!-- Loading Overlay -->
-  <div class="loading-overlay" id="loadingOverlay">
-    <div class="spinner"></div>
-  </div>
+  <div class="loading-overlay" id="loadingOverlay"><div class="spinner"></div></div>
 
   <!-- Editor Modal -->
   <div id="editorModal">
     <div class="editor-container">
+
+      <!-- Instructions -->
       <div class="editor-instructions">
         <strong>📝 Instructions:</strong>
-        <ul style="margin: 10px 0;">
-          <li>Cliquez sur l'image pour ajouter une annotation</li>
-          <li>Entrez un numéro quand demandé</li>
-          <li>Côté gauche = annotations gauche, Côté droit = annotations droite</li>
-          <li>Cliquez sur un petit cercle pour le déplacer</li>
-          <li>Clic droit sur un grand cercle pour le supprimer</li>
-          <li>Cliquez sur "Enregistrer" quand terminé</li>
+        <ul style="margin:6px 0 0 0">
+          <li><b>Clic 1</b> sur l'image → pose le point (cercle orange)</li>
+          <li><b>Clic 2</b> ailleurs → place le cercle numéroté + ligne</li>
+          <li>Répétez le clic 2 pour ajouter d'autres numéros au <b>même point</b></li>
+          <li><b>Clic droit</b> → relâche le point actif (nouveau point)</li>
+          <li><b>Clic droit sur un cercle numéroté</b> → le supprimer</li>
+          <li>Glissez le petit point <b>ou</b> le grand cercle pour les déplacer</li>
+          <li>Cliquez sur <b>Enregistrer</b> quand terminé</li>
         </ul>
       </div>
+
+      <!-- Toolbar -->
       <div class="editor-toolbar">
         <button class="btn-save-editor btn btn-success" onclick="saveEditorAnnotations()">💾 Enregistrer</button>
-        <button class="btn-clear-editor btn btn-danger" onclick="clearAllAnnotations()">🗑️ Effacer tout</button>
+        <button class="btn-clear-editor btn btn-danger"  onclick="clearAllAnnotations()">🗑️ Effacer tout</button>
         <span id="editorStatus" class="ms-3 fw-bold"></span>
-        <button class="btn-close-editor btn btn-secondary" onclick="closeEditor()">✖ Fermer</button>
+
+        <!-- Size control -->
+        <div style="display:flex;align-items:center;gap:6px;margin-left:auto;">
+          <span style="font-size:13px;font-weight:600;color:#555;">⬤ Taille:</span>
+          <button type="button"
+                  onclick="changeSize(-0.1)"
+                  style="width:30px;height:30px;border:1px solid #ccc;border-radius:4px;
+                         background:#fff;font-size:18px;font-weight:700;cursor:pointer;
+                         line-height:1;padding:0;">−</button>
+          <span id="sizeDisplay"
+                style="min-width:40px;text-align:center;font-weight:700;
+                       font-size:14px;color:#1565C0;">1.0x</span>
+          <button type="button"
+                  onclick="changeSize(0.1)"
+                  style="width:30px;height:30px;border:1px solid #ccc;border-radius:4px;
+                         background:#fff;font-size:18px;font-weight:700;cursor:pointer;
+                         line-height:1;padding:0;">+</button>
+        </div>
+
+        <button class="btn-close-editor btn btn-secondary ms-3" onclick="closeEditor()">✖ Fermer</button>
       </div>
-      <canvas id="editorCanvas" width="700" height="900"></canvas>
+
+      <!-- Canvas -->
+      <div class="editor-canvas-wrap">
+        <canvas id="editorCanvas"></canvas>
+      </div>
+
     </div>
   </div>
 
@@ -84,211 +81,228 @@
   {% endwith %}
 
   <div class="container mt-4">
-    <form method="POST" enctype="multipart/form-data" id="mainForm">
 
-      <!-- Reference Selection -->
-      <div class="row mb-3">
-        <div class="input-group w-100">
-          <select id="updateRef" name="updateRef" class="form-select w-55">
-            <option value="">Sélectionner une référence</option>
-            {% for ref in references %}
-              <option value="{{ ref }}">{{ ref }}</option>
+    <!-- Dropdown + actions -->
+    <div class="row mb-3">
+      <div class="col">
+        <div class="input-group">
+
+          <!-- Hidden select (real form field) -->
+          <select id="updateRef" name="updateRef" form="mainForm" style="display:none">
+            <option value="">Sélectionner un Name</option>
+            {% for name in names %}
+              <option value="{{ name }}" {% if name == name_selected %}selected{% endif %}>{{ name }}</option>
             {% endfor %}
           </select>
-          <button type="submit" formaction="/update_fiche" class="btn btn-warning w-15">Mettre à jour</button>
-          <button type="button" class="btn btn-info w-15" onclick="GOficheTechnique()">Voir fiche</button>
-          <button type="button" class="btn btn-danger w-15" onclick="confirmDelete()">Supprimer</button>
-        </div>
-      </div>
 
-      <h1>Ajouter Fiche Technique</h1>
-
-      <!-- Type: Cloison / Porte -->
-      <div class="radio-container">
-        <label class="radio-label"><input type="radio" name="type" value="Cloison" checked> Cloison</label>
-        <label class="radio-label"><input type="radio" name="type" value="Porte"> Porte</label>
-      </div>
-
-      <!-- GENERAL INFORMATION -->
-      <div class="category">INFORMATIONS GÉNÉRALES</div>
-      <div class="row mb-2">
-        <div class="col">
-          <label for="reference" class="form-label">Référence</label>
-          <input type="text" class="form-control" name="reference" id="reference" placeholder="Référence" required>
-        </div>
-        <div class="col">
-          <label class="form-label">Section</label>
-          <input type="text" class="form-control" name="section" placeholder="Section" required>
-        </div>
-      </div>
-
-      <div class="row mb-2">
-        <div class="col">
-          <label class="form-label">Description</label>
-          <textarea class="form-control" name="description" maxlength="250" placeholder="Description (max 250 caractères)"></textarea>
-        </div>
-      </div>
-
-      <!-- Product Photo -->
-      <div class="category">PHOTO DU PRODUIT</div>
-      <div class="row mb-2">
-        <div class="col">
-          <input type="file" class="form-control" name="photo_produit" accept="image/*" onchange="previewImage(this, 'photoPreview')">
-          <input type="hidden" name="delete_photo_produit" id="delete_photo_produit" value="false">
-          <div class="image-preview-container mt-2">
-            <img id="photoPreview" class="preview preview-image d-none" src="">
-            <button type="button" class="delete-image-btn" onclick="markImageForDeletion('photo_produit', 'photoPreview')">×</button>
+          <!-- Visible searchable dropdown -->
+          <div class="custom-dropdown">
+            <div class="dropdown-header" id="dropdownHeader" tabindex="0">
+              <span id="selectedValue">
+                {% if name_selected %}{{ name_selected }}{% else %}Sélectionner un Name – {{ names|length }} disponibles{% endif %}
+              </span>
+              <div class="dropdown-arrow"></div>
+            </div>
+            <div class="dropdown-menu-custom" id="dropdownMenu">
+              <div class="search-box">
+                <input type="text" class="search-input" placeholder="Rechercher..." id="searchInput">
+              </div>
+              <ul class="dropdown-list" id="dropdownList">
+                <li class="dropdown-item-custom {% if not name_selected %}selected{% endif %}" data-value="">
+                  <span>Sélectionner un Name</span>
+                  <span class="checkmark">
+                    <svg width="16" height="16" viewBox="0 0 24 24"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41L9 16.17z"/></svg>
+                  </span>
+                </li>
+                {% for name in names %}
+                <li class="dropdown-item-custom {% if name == name_selected %}selected{% endif %}" data-value="{{ name }}">
+                  <span>{{ name }}</span>
+                  <span class="checkmark">
+                    <svg width="16" height="16" viewBox="0 0 24 24"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41L9 16.17z"/></svg>
+                  </span>
+                </li>
+                {% endfor %}
+              </ul>
+            </div>
           </div>
+
+          <button type="submit" formaction="{{ base }}/update_fiche" form="mainForm" class="btn btn-warning">Mettre à jour</button>
+          <button type="button" class="btn btn-info" onclick="GOficheTechnique()">Voir Plan</button>
+          <button type="button" class="btn btn-danger" onclick="confirmDelete()">Supprimer</button>
+        </div>
+      </div>
+    </div>
+
+    <form method="POST" enctype="multipart/form-data" id="mainForm">
+
+      <h1>Ajouter / Modifier Plan Principe</h1>
+
+      <!-- ══ INFORMATIONS GÉNÉRALES ══ -->
+      <div class="category">INFORMATIONS GÉNÉRALES</div>
+
+      <div class="row mb-2">
+        <div class="col-md-12">
+          <label class="form-label">Name du Plan <span class="text-danger">*</span></label>
+          <input type="text" class="form-control" name="name" id="name"
+                 placeholder="Référence unique" required>
         </div>
       </div>
 
-      <!-- DIMENSIONS -->
-      <div class="category">DIMENSIONS DES ÉLÉMENTS</div>
       <div class="row mb-2">
-        <div class="col"><label class="form-label">Hauteur</label><input type="text" class="form-control" name="hauteur" placeholder="Hauteur (mm)"></div>
-        <div class="col"><label class="form-label">Largeur</label><input type="text" class="form-control" name="largeur" placeholder="Largeur (mm)"></div>
-        <div class="col"><label class="form-label">Épaisseur</label><input type="text" class="form-control" name="epaisseur_battent" placeholder="Épaisseur Battant (mm)"></div>
-        <div class="col"><label class="form-label">Tolérance en hauteur</label><input type="text" class="form-control" name="tolerance_hauteur" placeholder="Tolérance Hauteur (mm)"></div>
+        <div class="col-md-6">
+          <label class="form-label">REF CLIENT</label>
+          <input type="text" class="form-control" name="ref_client" id="ref_client"
+                 placeholder="REF CLIENT">
+        </div>
+        <div class="col-md-6">
+          <label class="form-label">PROJET</label>
+          <input type="text" class="form-control" name="projet" id="projet"
+                 placeholder="PROJET">
+        </div>
       </div>
 
-      <!-- MASSES VOLUMIQUES -->
-      <div class="category">MASSES VOLUMIQUES</div>
       <div class="row mb-2">
-        <div class="col"><label class="form-label">Verre (kg/m³)</label><input type="text" class="form-control" name="masse_verre" placeholder="Verre (kg/m³)"></div>
-        <div class="col"><label class="form-label">Panneau</label><input type="text" class="form-control" name="masse_Panneau" placeholder="Panneau"></div>
-        <div class="col"><label class="form-label">Poids cloison</label><input type="text" class="form-control" name="masse_Poids_cloison" placeholder="Poids cloison"></div>
+        <div class="col-md-6">
+          <label class="form-label">Plan de principe</label>
+          <input type="text" class="form-control" name="Plan_de_principe" id="Plan_de_principe"
+                 placeholder="Plan de principe">
+        </div>
+        <div class="col-md-6">
+          <label class="form-label">ADRESSE DU CHANTIER</label>
+          <input type="text" class="form-control" name="adress" id="adress"
+                 placeholder="ADRESSE DU CHANTIER">
+        </div>
       </div>
 
-      <!-- FIRE RESISTANCE -->
-      <div class="category">RÉSISTANCE AU FEU</div>
       <div class="row mb-2">
-        <div class="col"><label class="form-label">Résistance au feu standard</label><input type="text" class="form-control" name="resistance_feu_standard" placeholder="Résistance au feu standard"></div>
+        <div class="col-md-6">
+          <label class="form-label">Nom du fichier</label>
+          <input type="text" class="form-control" name="Nom_du_fichier" id="Nom_du_fichier"
+                 placeholder="Nom du fichier">
+        </div>
+        <div class="col-md-6">
+          <label class="form-label">Date de création</label>
+          <input type="date" class="form-control" name="Date_de_creation" id="Date_de_creation">
+        </div>
       </div>
 
-      <!-- ACOUSTIC PERFORMANCE -->
-      <div class="category">PERFORMANCE ACOUSTIQUE</div>
-      <div class="row mb-2">
-        <div class="col"><label class="form-label">NBN S 01-400</label><input type="text" class="form-control" name="acoustique_porte_nbn_s_01_400" placeholder="NBN S 01-400"></div>
-        <div class="col"><label class="form-label">NBN EN ISO 717-1 (RW)</label><input type="text" class="form-control" name="acoustique_porte_nbn_en_iso_717_1" placeholder="NBN EN ISO 717-1 (RW)"></div>
-      </div>
-
-      <!-- DESIGN & FLEXIBILITY -->
-      <div class="category">DESIGN ET FLEXIBILITÉ</div>
-      <div class="row mb-2">
-        <div class="col"><textarea class="form-control" name="DESIGN_ET_FLEXIBILITÉ" rows="3" placeholder="DESIGN ET FLEXIBILITÉ"></textarea></div>
-      </div>
-
-<!--      &lt;!&ndash; SOLIDITY & DURABILITY &ndash;&gt;-->
-<!--      <div class="category">SOLIDITÉ ET DURABILITÉ</div>-->
-<!--      <div class="row mb-2">-->
-<!--        <div class="col"><label class="form-label">Charnières</label><input type="text" class="form-control" name="charnieres" placeholder="Charnières"></div>-->
-<!--        <div class="col"><label class="form-label">Béquilles de portes</label><input type="text" class="form-control" name="bequilles" placeholder="Béquilles de portes"></div>-->
-<!--      </div>-->
-<!--      <div class="row mb-2">-->
-<!--        <div class="col"><label class="form-label">Serrure</label><input type="text" class="form-control" name="serrure" placeholder="Serrure"></div>-->
-<!--        <div class="col"><label class="form-label">Cylindre</label><input type="text" class="form-control" name="cylindre" placeholder="Cylindre"></div>-->
-<!--      </div>-->
-<!--      <div class="row mb-2">-->
-<!--        <div class="col"><label class="form-label">Arrêt de porte</label><input type="text" class="form-control" name="arret_porte" placeholder="Arrêt de porte"></div>-->
-<!--      </div>-->
-
-      <!-- PERSONALIZATION -->
-      <div class="category">PERSONNALISATION ET OPTIONS</div>
-      <div class="row mb-2">
-        <div class="col"><textarea class="form-control" name="personnalisation" rows="3" placeholder="Personnalisation et options"></textarea></div>
-      </div>
-
-      <!-- IMPLEMENTATION -->
-<!--      <div class="category">MISE EN ŒUVRE</div>-->
-<!--      <div class="row mb-2">-->
-<!--        <div class="col"><textarea class="form-control" name="mise_en_oeuvre" rows="3" placeholder="Mise en œuvre"></textarea></div>-->
-<!--      </div>-->
-
-      <!-- CUSTOMER SERVICE -->
-<!--      <div class="category">SERVICE CLIENTS</div>-->
-<!--      <div class="row mb-2">-->
-<!--        <div class="col"><textarea class="form-control" name="service_clients" rows="3" placeholder="Service clients"></textarea></div>-->
-<!--      </div>-->
-
-      <!-- EXPLODED VIEW IMAGE -->
-      <div class="category">VUE ÉCLATÉE PRODUIT</div>
+      <!-- ══ VUE Plan Principe ══ -->
+      <div class="category">VUE Plan Principe</div>
       <div class="row mb-2">
         <div class="col">
           <div class="input-group w-100">
-            <input type="file" class="form-control" name="vue_eclatee_image" id="imageUpload" accept="image/*" onchange="handleImageUpload(this)" style="width:70%;">
-            <button type="button" class="btn btn-light w-30" id="btnEditImage">✏️ Éditer</button>
+<!--            <input type="file" class="form-control" name="plan" id="imageUpload"-->
+<!--                   accept="image/*" onchange="handleImageUpload(this)" style="flex:1;">-->
+
+            <input type="file" id="imageUpload" name="plan" accept="application/pdf" onchange="handleImageUpload(this)" ...>
+            <span id="imageSizeDisplay"
+                  style="display:none; align-items:center; padding:0 12px;
+                         background:#f0fdf4; border:1px solid #bbf7d0; border-left:none;
+                         border-radius:0 7px 7px 0; font-size:12px; font-weight:600;
+                         color:#059669; white-space:nowrap; min-width:200px;">
+            </span>
+            <button type="button" class="btn btn-light" id="btnEditImage"
+                    disabled title="Aucune image à éditer">✏️ Éditer</button>
           </div>
-          <input type="hidden" name="delete_vue_eclatee_image" id="delete_vue_eclatee_image" value="false">
-          <div id="imgError" class="text-danger mt-1" style="display:none;">L'image doit être exactement 700x900 pixels !</div>
+          <input type="hidden" name="delete_plan" id="delete_plan" value="false">
+          <input type="hidden" name="plan_already_saved" id="plan_already_saved" value="">
         </div>
       </div>
       <div class="row mb-2">
         <div class="col text-center">
           <div class="image-preview-container">
-            <img id="explodedPreview" class="preview d-none" src="" style="max-width:100%; max-height:400px;">
-            <button type="button" class="delete-image-btn" onclick="markImageForDeletion('vue_eclatee_image', 'explodedPreview')">×</button>
+            <img id="explodedPreview" class="preview d-none" src="">
+            <button type="button" class="delete-image-btn"
+                    onclick="markImageForDeletion('plan','explodedPreview')">×</button>
           </div>
         </div>
       </div>
 
-      <!-- Exploded View Components -->
-      {% for row in [(1,12), (2,13), (3,14), (4,15), (5,16), (6,17), (7,18), (8,19), (9,20), (10,21), (11,22)] %}
-        <div class="row mb-2">
+      <!-- ══ COMPOSANTS ══ -->
+      <div class="category">COMPOSANTS (vue éclatée 1–{{ max_vue }})</div>
+      {% for i in range(1, max_vue + 1) %}
+        <div class="row mb-2 align-items-center g-2 composant-row"
+             id="composant-row-{{ i }}"
+             style="display:none;">
           <div class="col">
             <div class="input-group">
-              <span class="input-group-text">{{ row[0] }}</span>
-              <input type="text" class="form-control" name="vue_eclatee_{{ row[0] }}" placeholder="Composant {{ row[0] }}">
+              <span class="input-group-text text-muted"
+                    style="font-size:11px;min-width:42px;justify-content:center;background:#f8f9fa;">
+                N°
+              </span>
+              <input type="text" class="form-control composant-number"
+                     name="number_{{ i }}"
+                     id="number_{{ i }}"
+                     placeholder="N°"
+                     oninput="onNumberInput(this, {{ i }})">
             </div>
           </div>
           <div class="col">
             <div class="input-group">
-              <span class="input-group-text">{{ row[1] }}</span>
-              <input type="text" class="form-control" name="vue_eclatee_{{ row[1] }}" placeholder="Composant {{ row[1] }}">
+              <span class="input-group-text text-muted"
+                    style="font-size:11px;min-width:42px;justify-content:center;background:#f8f9fa;">
+                desc
+              </span>
+              <input type="text" class="form-control"
+                     name="description_{{ i }}"
+                     id="description_{{ i }}"
+                     placeholder="Description {{ i }}">
             </div>
           </div>
         </div>
       {% endfor %}
 
-      <!-- TECHNICAL DRAWINGS -->
-      <div class="category">DESSINS TECHNIQUES PRODUIT</div>
-      {% for i in range(1,7) %}
-        <div class="row mb-3 align-items-center">
-          <div class="col-md-4">
-            <input type="file" class="form-control" id="dessinInput{{i}}" name="dessin_technique_{{i}}" accept="image/*" onchange="checkExactSize(this, 'dessinPreview{{i}}', 'errorMsg{{i}}', {{i}})">
-            <input type="hidden" name="delete_dessin_technique_{{i}}" id="delete_dessin_technique_{{i}}" value="false">
-            {% if i <= 5 %}
-              <small id="errorMsg{{i}}" class="text-danger d-none">⚠ Image horizontale {{i}} doit être exactement <b>400 × 300 px</b>.</small>
-            {% else %}
-              <small id="errorMsg{{i}}" class="text-danger d-none">⚠ Image verticale doit être exactement <b>300 × 940 px</b>.</small>
-            {% endif %}
-          </div>
-          <div class="col-md-4">
-            <input type="text" class="form-control mt-2" name="dessin_technique_nom_{{i}}" placeholder="Nom du dessin {{i}}">
-          </div>
-          <div class="col-md-4 text-center">
-            <div class="image-preview-container">
-              <img id="dessinPreview{{i}}" class="preview d-none" src="" style="max-height:100px;">
-              <button type="button" class="delete-image-btn" onclick="markImageForDeletion('dessin_technique_{{i}}', 'dessinPreview{{i}}')">×</button>
-            </div>
-          </div>
-        </div>
-      {% endfor %}
+      <script>
+        let _lastVisibleRow = 0;
+
+        function _showRow(i) {
+          const row = document.getElementById('composant-row-' + i);
+          if (row) row.style.display = '';
+          if (i > _lastVisibleRow) _lastVisibleRow = i;
+        }
+
+        function onNumberInput(input, i) {
+          const val = input.value.trim();
+          if (!val && i === _lastVisibleRow) {
+            document.getElementById('composant-row-' + i).style.display = 'none';
+            _lastVisibleRow = Math.max(0, i - 1);
+          }
+        }
+
+        // ✅ Affiche UNIQUEMENT les lignes qui possèdent un numéro (issu du canvas).
+        //    Plus de ligne vide supplémentaire, plus d'ajout manuel de composant.
+        function refreshComposantRows() {
+          const maxVue = {{ max_vue }};
+          _lastVisibleRow = 0;
+          for (let i = 1; i <= maxVue; i++) {
+            const row = document.getElementById('composant-row-' + i);
+            if (row) row.style.display = 'none';
+          }
+          let lastFilled = 0;
+          for (let i = 1; i <= maxVue; i++) {
+            const numVal = (document.getElementById('number_' + i) || {}).value || '';
+            if (numVal.trim()) lastFilled = i;
+          }
+          for (let i = 1; i <= lastFilled; i++) _showRow(i);
+        }
+
+        document.addEventListener('DOMContentLoaded', refreshComposantRows);
+      </script>
 
       <input type="hidden" name="previous_ref" id="previous_ref">
 
-      <!-- Submit Button -->
-      <div class="row mb-3">
+      <div class="row mb-3 mt-3">
         <div class="col">
-          <button type="submit" class="btn btn-primary w-100" formaction="/add_fiche">Ajouter la Fiche Technique</button>
+          <button type="submit" class="btn btn-primary w-100" formaction="{{ base }}/add_fiche">
+            ➕ Ajouter le Plan Principe
+          </button>
         </div>
       </div>
 
     </form>
   </div>
 
-  <!-- JS -->
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
   <script src="{{ url_for('static', filename='js/home.js') }}"></script>
-
 </body>
 </html>

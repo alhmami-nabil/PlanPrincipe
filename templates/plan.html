@@ -1,0 +1,327 @@
+<!DOCTYPE html>
+<html lang="en" id="html-root">
+<head>
+<meta charset="UTF-8">
+<title>{{ fiche.name }}</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}?v=2">
+</head>
+<body>
+
+<!-- PRINT TOOLBAR — hidden on print -->
+<div class="print-toolbar">
+    <button onclick="window.location.href='{{ base }}/?name={{ fiche.name }}'">← Retour</button>
+    <button onclick="window.print()" class="active">🖨 Imprimer</button>
+</div>
+
+<div class="sheet">
+
+    <!-- Border strips -->
+    <div class="bt">
+        <div></div>
+        <div>01</div><div>02</div><div>03</div>
+        <div>04</div><div>05</div><div>06</div>
+        <div>07</div><div>08</div><div>09</div>
+        <div>10</div><div>11</div><div>12</div>
+        <div></div>
+    </div>
+    <div class="bb">
+        <div></div>
+        <div>01</div><div>02</div><div>03</div>
+        <div>04</div><div>05</div><div>06</div>
+        <div>07</div><div>08</div><div>09</div>
+        <div>10</div><div>11</div><div>12</div>
+        <div></div>
+    </div>
+    <div class="bl">
+        <div>A</div><div>B</div><div>C</div>
+        <div>D</div><div>E</div><div>F</div>
+        <div>G</div><div>H</div>
+    </div>
+    <div class="br">
+        <div>A</div><div>B</div><div>C</div>
+        <div>D</div><div>E</div><div>F</div>
+        <div>G</div><div>H</div>
+    </div>
+
+    <!-- Corners -->
+    <div class="corner c-tl">
+        <svg viewBox="0 0 21 21"><rect width="21" height="21" fill="#fff"/><polygon points="0,0 21,0 0,21" fill="#000"/></svg>
+    </div>
+    <div class="corner c-tr">
+        <svg viewBox="0 0 21 21"><rect width="21" height="21" fill="#fff"/><polygon points="21,0 0,0 21,21" fill="#000"/></svg>
+    </div>
+    <div class="corner c-bl">
+        <svg viewBox="0 0 21 21"><rect width="21" height="21" fill="#fff"/><polygon points="0,21 21,21 0,0" fill="#000"/></svg>
+    </div>
+    <div class="corner c-br">
+        <svg viewBox="0 0 21 21"><rect width="21" height="21" fill="#fff"/><polygon points="21,21 0,21 21,0" fill="#000"/></svg>
+    </div>
+
+    <!-- Inner frame -->
+    <div class="frame">
+
+        <!-- LEFT: drawing zone -->
+        <div class="drawing-zone">
+            <div class="drawing-image">
+                {% if svg_inline %}
+                    {# ✅ SVG INLINE : vectoriel à l'impression → annotations nettes en A0 #}
+                    {{ svg_inline | safe }}
+                {% elif fiche.plan %}
+                    {# Fallback si le fichier SVG est introuvable sur le disque #}
+                    <img
+                        src="{{ url_for('static', filename=fiche.plan) }}"
+                        alt="Plan"
+                        style="width:100%;height:100%;object-fit:contain;display:block;">
+                {% else %}
+                <div style="display:flex;align-items:center;justify-content:center;
+                        height:100%;color:#aaa;font-family:Arial,sans-serif;font-size:13px;">
+                        Aucun plan disponible
+                </div>
+                {% endif %}
+            </div>
+        </div>
+
+        <!-- RIGHT: block -->
+        <div class="block">
+
+            <!-- TABLE -->
+            <div class="table">
+                <div class="table-header">
+                    <span>N°</span>
+                    <span>Description</span>
+                    <span>N°</span>
+                    <span>Description</span>
+                </div>
+                <div class="table-body">
+                    {% set entries = [] %}
+                    {% for k, v in fiche.items() %}
+                        {% if k.startswith('number_') and v %}
+                            {% set num = k.split('_')[1] | int %}
+                            {% set desc = fiche.get('description_' ~ num, '') or '' %}
+                            {% if entries.append({'num': num, 'desc': desc}) %}{% endif %}
+                        {% endif %}
+                    {% endfor %}
+                    {% set entries = entries | sort(attribute='num') %}
+                    {% set half = ((entries | length) / 2) | round(0, 'ceil') | int %}
+                    {% set left_col  = entries[:half] %}
+                    {% set right_col = entries[half:] %}
+                    {% for i in range(half) %}
+                    <div class="table-row">
+                        {% if i < left_col | length %}
+                        <div class="num"><span>{{ left_col[i].num }}</span></div>
+                        <div class="desc">{{ left_col[i].desc }}</div>
+                        {% else %}
+                        <div class="num"><span></span></div>
+                        <div class="desc"></div>
+                        {% endif %}
+                        {% if i < right_col | length %}
+                        <div class="num"><span>{{ right_col[i].num }}</span></div>
+                        <div class="desc">{{ right_col[i].desc }}</div>
+                        {% else %}
+                        <div class="num"><span></span></div>
+                        <div class="desc"></div>
+                        {% endif %}
+                    </div>
+                    {% endfor %}
+                    {% if not entries %}
+                    <div class="table-row">
+                        <div class="num"><span></span></div>
+                        <div class="desc" style="color:#aaa;font-style:italic;">Aucun composant</div>
+                        <div class="num"><span></span></div>
+                        <div class="desc"></div>
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+
+            <!-- FORMATEC -->
+            <div class="formaTec">
+
+                <!-- 6 cellules texte légal -->
+                <div class="Description">
+                    <div class="cell"><span class="cell-label">LES CLOISONS AMOVIBLES TECNIBO NE SONT PAS DES CLOISONS"PORTEUSES".
+                        LES CLOISONS SONT FIXÉES MÉCANIQUEMENT AUX MURS SOLS ET PLAFONDS DU BÂTIMENT.
+                        SEUL LES RACCORDS FAÇADES SUR CHÂSSIS BOIS OU ALUMINIUM SONT FIXÉS AVEC DU DOUBLE FACE.
+                        TOUS NOS ANCRAGES SONT CENSÉS ÊTRESUFFISANT SUIVANT LE PRINCIPE QUE NOUS FIXONS SUR UN SUPPORT STABLE ET RIGIDE.</span></div>
+                    <div class="cell"><span class="cell-label">POUR L'INSTALLATION DES VITRAGES, LE CHANTIER DOIT ÊTRE BIEN PROPRE ET EXEMPT DE POUSSIÈRES.
+                        UN TAUX D'HUMIDITÉ TROP ÉLEVÉ PEUT ÉGALEMENT ENGENDRER UN VOILE A L'INTÉRIEUR DES CLOISONS DOUBLES VITRAGES CETTE RÉACTION N'EST PAS DUE
+                        À NOS PRODUITS ET NE PEUT DONNER LUI A RÉCLAMATION.</span></div>
+                    <div class="cell"><span class="cell-label">TOUS NOS RACCORDS AU NIVEAU DES SOLS,PLAFOND OU MUR SONT RÉALISÉS AVEC DES JOINTS APPROPRIÉS.
+                        DES JOINTS COMPLÉMENTAIRES DE TYPE SILICONES PEUVENT ÊTRE RÉALISÉS SUR DEMANDE.
+                        CEUX-CI FERONT PARTIES D'UNE OFFRE SPÉCIFIQUE SUPPLÉMENTAIRE.</span></div>
+                    <div class="cell"><span class="cell-label">MATÉRIAUX: LE BOIS AINSI QUE LES MATÉRIAUX DÉRIVÉS DU BOIS SONT DES PRODUITS NATURELS.
+                        DES DIFFÉRENCES DE COULEUR, TON, FIBRE, VEINE, NOEUD,STRUCTURE, TEXTURE ET SURFACE SONT TOUJOURS POSSIBLE ET INEVITABLE ET CE MALGRÉ LA MÊME ESSENCE DE BOIS OU DE DÉCOR.
+                        CES DIFFÉRENCES NE PEUVENT DONNER LIEU À RÉCLAMATION.</span></div>
+                    <div class="cell"><span class="cell-label">TECNIBO EST FABRICANT ET INSTALLATEUR DE CLOISONS AMOVIBLES ET MOBILIER.
+                        LES CHOIX DES COULEURS ET FINITIONS SONT ET RESTENT CEUX DU CLIENT, TOUS LES FABRICANTS DE MATÉRIAUX LIVRENT DES ÉCHANTILLONS DANS
+                        UN DÉLAI COURT AFIN DE FACILITER LES CHOIX.</span></div>
+                    <div class="cell"><span class="cell-label">FINITIONS: LA NATURE DU SUPPORT PEUT ENGENDRER DES DIFFÉRENCES VISUELLES DE TEINTES AINSI QU'AU NIVEAU DU DEGRÉ DE BRILLANCE.
+                        UNE FINITION DE RÉFÉRENCE IDENTIQUE PEUT DONC ÊTRE DIFFÉRENTE À L'OEIL QU'ELLE SOIT SUR HPL, MELAMINE SUR AGGLO OU MDF SUR , LAQUÉE SUR BOIS? SUR ALU OU ACIER.
+                        CES DIFFÉRENCES NE PEUVENT DONNER LIEU À RÉCLAMATION.</span></div>
+                </div>
+
+                <!-- LOGO TECNIBO + BON POUR ACCORD -->
+                <div class="logo">
+                    <div class="logo-brand">
+                        <span class="logo-name">TECNIBO</span>
+                    </div>
+                    <div class="logo-accord">
+                        <span class="accord-title">BON POUR ACCORD FABRICATION ET POSE</span>
+                        <span class="accord-body">L'APPROBATION DU MAÎTRE D'OUVRAGE OU DE SON REPRÉSENTANT IMPLIQUE LE LANCEMENT EN FABRICATION. SI SELON LE DESCRIPTIF CI-DESSOUS TOUT MODIFICATION NÉCESSITERAIT UNE NOUVELLE NÉGOCIATION CONCERNANT LE DÉLAI, L'EXÉCUTION ET LE PRIX.<br><br>CETTE APPROBATION VAUT COMMANDE.</span>
+                        <span class="accord-footer">DATE, SIGNATURE, CACHET</span>
+                    </div>
+                </div>
+
+                <!-- INFO -->
+                <div class="info">
+                    <div class="info-header">
+                        <div class="col-left">
+                            <span class="field-label">Maître d'oeuvre</span>
+                            <span class="field-value"><b>Tecnibo Lux S.A.</b></span>
+                            <span class="field-value">22 rue de l'industrie</span>
+                            <span class="field-value">L-8399 WINDHOF</span>
+                            <span class="field-value">Tél: +352 26 10 80 77</span>
+                            <span class="field-value">Fax: +352 26 10 80 78</span>
+                            <span class="field-value">info@tecnibo.lu</span>
+                            <span class="field-value">Marketing documentation</span>
+                            <span class="field-value">Fabrice Collart</span>
+                            <span class="field-value">LUXEMBOURG</span>
+                        </div>
+
+                        <div class="col-right">
+                            <div class="field-group">
+                                <span class="field-label">Ref Client :</span>
+                                <span class="field-value"><b>{{ fiche.ref_client or '' }}</b></span>
+                            </div>
+                            <div class="field-group">
+                                <span class="field-label">Projet :</span>
+                                <span class="field-value"><b>{{ fiche.projet or fiche.name }}</b></span>
+                            </div>
+                            <div class="field-group">
+                                <span class="field-label">Plan de principe :</span>
+                                <span class="field-value">{{ fiche.Plan_de_principe or '' }}</span>
+                            </div>
+                            <div class="field-group">
+                                <span class="field-label">Adresse du chantier :</span>
+                                <span class="field-value">{{ fiche.adress or '' }}</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="info-revisions">
+                        <table class="rev-table">
+                            <thead>
+                                <tr>
+                                    <th class="col-ind">Ind.</th>
+                                    <th class="col-date">Date</th>
+                                    <th class="col-desc">Descriptif des modifications</th>
+                                    <th class="col-par">Par</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr><td></td><td></td><td></td><td></td></tr>
+                                <tr><td></td><td></td><td></td><td></td></tr>
+                                <tr><td></td><td></td><td></td><td></td></tr>
+                                <tr><td></td><td></td><td></td><td></td></tr>
+                                <tr><td></td><td></td><td></td><td></td></tr>
+                                <tr><td></td><td></td><td></td><td></td></tr>
+                                <tr><td></td><td></td><td></td><td></td></tr>
+                                <tr><td></td><td></td><td></td><td></td></tr>
+                                <tr><td></td><td></td><td></td><td></td></tr>
+                                <tr><td></td><td></td><td></td><td></td></tr>
+                                <tr><td></td><td></td><td></td><td></td></tr>
+                                <tr><td></td><td></td><td></td><td></td></tr>
+                                <tr><td></td><td></td><td></td><td></td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+
+                    <div class="info-footer">
+                        <div class="foot-cell">
+                            <span class="foot-row"><span class="foot-label">Plan :</span>&nbsp;<span class="foot-value">PM</span></span>
+                            <span class="foot-row"><span class="foot-label">Format papier :</span>&nbsp;<span class="foot-value foot-format-val">A0</span></span>
+                            <span class="foot-row"><span class="foot-label">Echelle :</span>&nbsp;<span class="foot-value">1/1</span></span>
+                        </div>
+                        <div class="foot-cell">
+                            <span class="foot-value large">FAC</span>
+                            <span class="foot-value large">RAJ</span>
+                            <span class="foot-row">
+                                <span class="foot-label">Nom du fichier :</span>&nbsp;
+                                <span class="foot-value">{{ fiche.Nom_du_fichier or fiche.name }}</span>
+                            </span>
+                        </div>
+                        <div class="foot-cell">
+                            <span class="foot-row"><span class="foot-label">Date de création :</span></span>
+                            <span class="foot-value">
+                                {% if fiche.Date_de_creation %}
+                                    {% set parts = fiche.Date_de_creation.split('-') %}
+                                    {% if parts | length == 3 %}
+                                        {{ parts[2] }}/{{ parts[1] }}/{{ parts[0] }}
+                                    {% else %}
+                                        {{ fiche.Date_de_creation }}
+                                    {% endif %}
+                                {% else %}
+                                    {{ "now" | date("%d/%m/%Y") }}
+                                {% endif %}
+                            </span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+    </div>
+
+</div><!-- end .sheet -->
+
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+    const format = "{{ format | default('A0') }}";
+    document.getElementById('html-root').setAttribute('data-format', format);
+
+    const dims = {
+        'A0': { w: '841 MM',  h: '1189 MM', label: 'A0' },
+        'A1': { w: '594 MM',  h: '841 MM',  label: 'A1' },
+        'A2': { w: '420 MM',  h: '594 MM',  label: 'A2' },
+        'A3': { w: '297 MM',  h: '420 MM',  label: 'A3' },
+        'A4': { w: '210 MM',  h: '297 MM',  label: 'A4' },
+    };
+    const d = dims[format] || dims['A0'];
+
+    const dimW = document.getElementById('dim-w');
+    const dimH = document.getElementById('dim-h');
+    const dimName = document.getElementById('dim-format-name');
+    if (dimW) dimW.textContent = d.w;
+    if (dimH) dimH.textContent = d.h;
+    if (dimName) dimName.textContent = d.label;
+
+    const fmtVal = document.querySelector('.foot-format-val');
+    if (fmtVal) fmtVal.textContent = d.label;
+
+    let dynStyle = document.createElement('style');
+    dynStyle.id = 'dyn-page-size';
+    dynStyle.textContent = format === 'A4'
+        ? '@page { size: A4 landscape; margin: 0; }'
+        : '@page { size: A0 landscape; margin: 0; }';
+    document.head.appendChild(dynStyle);
+
+    const params = new URLSearchParams(window.location.search);
+    if (params.has('format')) {
+        let printDone = false;
+        window.addEventListener('afterprint', () => {
+            if (!printDone) { printDone = true; window.location.href = '/'; }
+        });
+        document.addEventListener('visibilitychange', () => {
+            if (!document.hidden && printDone === false) {
+                setTimeout(() => {
+                    if (!printDone) { printDone = true; window.location.href = '/'; }
+                }, 200);
+            }
+        });
+        setTimeout(() => { window.print(); }, 400);
+    }
+});
+</script>
+
+</body>
+</html>

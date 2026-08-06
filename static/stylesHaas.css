@@ -1,658 +1,284 @@
-/* ==================== stylesHaas.css ==================== */
-
-/* Force all text inside PageA4 to black */
-.PageA4, .PageA4 * {
-  color: #000 !important;
-}
-
-/* ==================== FONTS ==================== */
-@font-face {
-  font-family: 'TecniboDisplay';
-  src: url('/static/fonts/TECNIBO-DISPLAY.otf') format('opentype');
-  font-weight: normal;
-  font-style: normal;
-}
-
-@font-face {
-  font-family: 'UniversalSans500';
-  src: url('/static/fonts/UniversalSans-500.ttf') format('truetype');
-  font-weight: normal;
-  font-style: normal;
-}
-
-/* ==================== DOWNLOAD BUTTONS ==================== */
-.Telecharger {
-  text-align: center;
-  margin-top: 20px;
-  margin-bottom: 20px;
-}
-
-.variante {
-  font-size: 22px;
-}
-
-.Telecharger button {
-  background-color: #000;
-  color: white;
-  font-family: 'UniversalSans500', sans-serif;
-  font-size: 12px;
-  border: none;
-  border-radius: 6px;
-  padding: 10px 20px;
-  margin: 0 5px;
-  cursor: pointer;
-  transition: background-color 0.3s ease;
-}
-
-.Telecharger button:hover {
-  background-color: #333;
-}
-
-/* ==================== PAGE SETUP ==================== */
-.PageA4 {
-  width: 210mm;
-  height: 297mm;
-  margin: 0 auto 20px auto;
-  background: white;
-  box-shadow: 0 2px 10px rgba(0,0,0,0.1);
-  padding: 0;
-  box-sizing: border-box;
-  position: relative;
-  display: flex;
-  flex-direction: column;
-}
-
-/* ==================== HEADER ==================== */
-header {
-  height: 20mm;
-  padding: 13px 19px 20px 19px;
-}
-
-/*
-  The HTML has:
-    <div class="d-flex mb-5">
-      <div class="logo">TECNIBO</div>
-      <div class="d-flex text-muted-header header-right">
-        <span class="FICHE" style="margin-right: 121px;">FICHE PRODUIT</span>
-        <span class="SECTION" style="margin-right: 56px;">CLOISON</span>
-        <span class="CPID">HAAS</span>
-      </div>
-    </div>
-
-  Fix: make the outer d-flex use space-between so logo goes left
-  and the nav group goes right. Override inline margin-right on spans
-  with gap on the inner flex container instead.
-*/
-
-/* Outer row: 2 equal halves — logo 50% left | nav 50% right */
-header .d-flex,
-header .d-flex.mb-5 {
-  display: flex !important;
-  align-items: center !important;
-  width: 100%;
-  margin-bottom: 0 !important;   /* cancel Bootstrap mb-5 */
-}
-
-.logo {
-  font-family: 'TecniboDisplay', sans-serif;
-  font-size: 20px;
-  color: #000;
-  letter-spacing: 1.7px;
-  /* Takes exactly 50% of the header row */
-  flex: 0 0 51%;
-  width: 51%;
-}
-
-.logo2 {
-  font-family: 'TecniboDisplay', sans-serif;
-  font-size: 30px;
-  margin-top: -3px;
-  color: #000;
-  letter-spacing: 2px;
-  flex: 0 0 51%;
-  width: 51%;
-}
-
-/* Right 50%: nav group with space-between between the 3 items */
-.header-right {
-  flex: 0 0 49%;
-  width: 49%;
-  display: flex !important;
-  align-items: center;
-  justify-content: space-between;   /* FICHE PRODUIT ←→ CLOISON ←→ HAAS */
-  letter-spacing: 0.3px;
-}
-
-.header-right2 {
-  flex: 0 0 49%;
-  width: 49%;
-  display: flex !important;
-  align-items: center;
-  justify-content: space-between;
-  letter-spacing: 0.3px;
-}
-
-/* Cancel the inline margin-right values hard-coded in the HTML spans */
-.header-right span,
-.header-right2 span {
-  margin-right: 0 !important;
-}
-
-/* Nav text style — the wrapper div sits inside header-right */
-.text-muted-header,
-.text-muted-header2 {
-  font-family: 'UniversalSans500', sans-serif;
-  font-size: 8px;
-  padding-top: 5px;
-  padding-bottom: 5px;
-  color: #000;
-  font-weight: bold;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  width: 100%;
-}
-
-/* Individual nav span labels */
-.FICHE,
-.SECTION,
-.CPID {
-  font-family: 'UniversalSans500', sans-serif;
-  font-size: 8px;
-  font-weight: bold;
-  letter-spacing: 0.3px;
-  color: #000;
-  white-space: nowrap;
-}
-
-/* ==================== MAIN CONTENT ==================== */
-main {
-  flex: 1;
-  padding: 13px 10px 20px 19px;
-  overflow: hidden;
-}
-
-.title {
-  font-family: 'TecniboDisplay', sans-serif;
-  font-size: 52px;
-  padding-top: 30px;
-  color: #000;
-  text-align: left;
-  text-transform: uppercase;
-}
-
-.variant {
-  color: #000;
-  text-align: left;
-  text-transform: uppercase;
-}
-
-.product-photo {
-  width: 97%;
-  height: 310px;
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  align-items: center;
-  color: #000;
-}
-
-/* ==================== TABLE ROWS ==================== */
-.table-row .col-6:first-child {
-  width: 48.5%;
-  margin-right: 15px;
-}
-
-.table-row .col-6:last-child {
-  width: 48.5%;
-  margin-left: -0.5px;
-}
-
-.text-muted {
-  font-family: 'UniversalSans500', sans-serif;
-  font-size: 8px;
-  padding-top: 5px;
-  padding-bottom: 5px;
-  color: #000;
-  letter-spacing: 0.3px;
-}
-
-.border-half {
-  border-top: 1px solid rgba(0,0,0,0.4);
-}
-
-.inner-row {
-  display: flex;
-  align-items: center;
-  padding: 5px 0;
-  border-top: 1px solid rgba(0,0,0,0.4);
-}
-
-.inner-row .left {
-  display: inline-block;
-  width: 192.5px;
-  font-family: 'UniversalSans500', sans-serif;
-  font-size: 8px;
-  letter-spacing: 0.3px;
-}
-
-.inner-row .right {
-  flex-grow: 1;
-  font-family: 'UniversalSans500', sans-serif;
-  font-size: 8px;
-  letter-spacing: 0.3px;
-  text-align: left;
-}
-
-.text-desc {
-  font-family: 'UniversalSans500', sans-serif;
-  font-size: 9px;
-  padding-top: 2px;
-  padding-bottom: 5px;
-  color: #000;
-  letter-spacing: 0.3px;
-}
-
-.padding {
-  padding-top: 18px;
-}
-
-.padding-test {
-  padding-top: 5px;
-  letter-spacing: 0.3px;
-  line-height: 1.7;
-}
-
-.text-muted-dim {
-  padding-top: 5px !important;
-}
-
-.text-muted-larg {
-  padding-bottom: 4px !important;
-}
-
-.text-muted-per {
-  padding-bottom: 4px !important;
-}
-
-/* ==================== FOOTER ==================== */
-.footer {
-  font-family: 'UniversalSans500', sans-serif;
-  padding: 13px 0px 0px 0px;
-  margin: 0px 18.5px 0px 18.5px;
-  height: 10mm;
-  border-top: 1px solid rgba(0,0,0,0.4);
-}
-
-.footer-content {
-  display: flex;
-  justify-content: flex-end;
-  align-items: center;
-}
-
-.numberPage {
-  font-size: 8px;
-  font-weight: 500;
-  color: #666;
-}
-
-/* ==================== PAGE 2 ==================== */
-.main1 {
-  height: 164.5mm;
-  margin: 0px 9.5px 0px 0px;
-}
-
-.main2 {
-  height: 100mm;
-}
-
-.padding-Pa3 {
-  padding-top: 36px;
-}
-
-.logTitle {
-  font-family: 'TecniboDisplay', sans-serif;
-  font-size: 20px;
-  margin-top: 2px;
-  color: #000;
-  letter-spacing: 1px;
-}
-
-#Image {
-  width: 50%;
-  margin-right: 190px !important;
-  margin: 14px auto 0 auto;
-  height: 474px;
-  display: flex;
-  justify-content: center;
-  align-items: center;
-}
-
-.two-column-list {
-  padding: 64px 9.5px 0px 0px;
-}
-
-.text-muted_main2 {
-  font-family: 'UniversalSans500', sans-serif;
-  font-size: 8px;
-  padding-top: 10.5px;
-  padding-bottom: 10.5px;
-  color: #000;
-  letter-spacing: 0.3px;
-}
-
-.padding-premier_page3 {
-  padding-top: 150px;
-  margin: 0px 9.5px 0px 0px;
-  border-bottom: 1px solid rgba(0,0,0,0.4);
-}
-
-/* ==================== PAGE 3 - TECHNICAL DRAWINGS ==================== */
-.main4 {
-  height: 100%;
-  margin: 0;
-  padding: 0;
-  box-sizing: border-box;
-  overflow: hidden;
-}
-
-.main4 > .row.table-row {
-  display: flex;
-  gap: 10px;
-  height: 100%;
-  margin: 0;
-  padding: 0;
-}
-
-.main4 .col-8 {
-  width: 68%;
-  display: flex;
-  flex-direction: column;
-  padding: 0;
-  box-sizing: border-box;
-}
-
-.main4 .col-4 {
-  width: 30%;
-  display: flex;
-  flex-direction: column;
-  padding: 0;
-  box-sizing: border-box;
-}
-
-.DesFlecHV {
-  font-family: 'UniversalSans500', sans-serif;
-  font-weight: bold;
-  text-align: center;
-  font-size: 16px;
-  padding: 12px 0;
-  margin: 0 0 10px 0;
-  flex-shrink: 0;
-}
-
-.main4 .Horizontal1,
-.main4 .Horizontal2 {
-  display: flex;
-  gap: 10px;
-  flex: 1;
-  min-height: 0;
-  margin: 0 0 10px 0;
-}
-
-.main4 .Horizontal3 {
-  display: flex;
-  justify-content: center;
-  gap: 10px;
-  flex: 1;
-  min-height: 0;
-  margin: 0;
-}
-
-.main4 .Horizontal1 .col-6,
-.main4 .Horizontal2 .col-6 {
-  flex: 1;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 0;
-}
-
-.main4 .Horizontal3 .col-6 {
-  flex: 0 0 48%;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 0;
-}
-
-.main4 .w3-container {
-  padding: 0;
-  margin: 0;
-  width: 100%;
-  height: 100%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  min-height: 0;
-}
-
-.main4 .w3-card-4 {
-  width: 100%;
-  height: 100%;
-  display: flex;
-  flex-direction: column;
-  background-color: white;
-  border: 1px solid #e0e0e0;
-  border-radius: 4px;
-  overflow: hidden;
-  box-shadow: 0 1px 3px rgba(0,0,0,0.1);
-  min-height: 0;
-}
-
-.main4 .w3-card-4 > img {
-  flex: 1;
-  width: 100%;
-  min-height: 0;
-  object-fit: contain;
-  display: block;
-  padding: 10px;
-}
-
-.main4 .w3-card-4 .w3-container {
-  flex-shrink: 0;
-  height: auto;
-  min-height: 40px;
-  max-height: 50px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 8px;
-  background: white;
-  border-top: 1px solid #e0e0e0;
-  overflow: hidden;
-}
-
-.main4 .w3-card-4 .w3-container p {
-  margin: 0;
-  padding: 5px;
-  font-family: 'UniversalSans500', sans-serif;
-  font-size: 11px;
-  font-weight: 500;
-  text-align: center;
-  line-height: 1.2;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-}
-
-.vertical {
-  flex: 1;
-  width: 100%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  overflow: hidden;
-  padding: 10px;
-  border: 1px solid #e0e0e0;
-  border-radius: 4px;
-  box-shadow: 0 1px 3px rgba(0,0,0,0.1);
-  min-height: 0;
-}
-
-.vertical img {
-  width: 100%;
-  height: 100%;
-  object-fit: contain;
-  display: block;
-}
-
-.main4 .row {
-  margin-left: 0;
-  margin-right: 0;
-}
-
-.main4 [class*="col-"] {
-  padding-left: 0;
-  padding-right: 0;
-}
-
-.main4 .gx-0 {
-  margin-left: 0;
-  margin-right: 0;
-}
-
-.main4 .gx-0 > * {
-  padding-left: 0;
-  padding-right: 0;
-}
-
-.w3-center {
-  text-align: center;
-}
-
-/* ==================== VARIANT IMAGES ==================== */
-/* Style B — image top, text below centered */
-.variant-style-b {
-  display: flex;
-  flex-direction: column;
-  align-items: left;
-  width: 100%;
-}
-
-.variant-style-b .variant-img {
-  width: 130px;
-  height: 90px;
-  object-fit: contain;
-  object-position: left center;
-}
-
-.variant-style-b .variant-label {
-  font-family: 'UniversalSans500', sans-serif;
-  font-size: 8px;
-  text-transform: uppercase;
-  color: #000 !important;
-  letter-spacing: 0.3px;
-  line-height: 1.4;
-  text-align: left;
-  margin-top: 5px;
-}
-
-/* Style C — text left, image right */
-.variant-style-c {
-  display: flex;
-  flex-direction: row;
-  align-items: center;
-  gap: 10px;
-  width: 100%;
-}
-
-.variant-style-c .variant-img {
-  width: 130px;
-  height: 90px;
-  object-fit: contain;
-  flex-shrink: 0;
-}
-
-.variant-style-c .variant-label {
-  font-family: 'UniversalSans500', sans-serif;
-  font-size: 8px;
-  text-transform: uppercase;
-  color: #000 !important;
-  letter-spacing: 0.3px;
-  line-height: 1.4;
-  text-align: center;
-  flex: 1;
-}
-
-/* ==================== PRINT STYLES ==================== */
-@page {
-  size: A4 portrait;
-  margin: 0;
-}
+/* ═══════════════════════════════════════════════════
+   stylesHaas.css — Tecnibo Plan Principe
+   A3 landscape, title block on RIGHT side
+═══════════════════════════════════════════════════ */
+
+* { margin:0; padding:0; box-sizing:border-box; }
+
+/* ══ EASY HEIGHT CONTROL ══════════════════════
+   Change ONLY --spacer-flex to adjust the split.
+   Higher number = title block lower (more space above)
+   Lower number  = title block higher (less space above)
+   0 = title block sticks to bottom of parts table
+══════════════════════════════════════════════ */
+:root {
+  --spacer-flex: 1;   /* ← adjust this value */
+}
+
+@page { size: A3 landscape; margin: 0; }
 
 @media print {
+  html { width:420mm; height:297mm; }
   body {
-    -webkit-print-color-adjust: exact;
-    print-color-adjust: exact;
-    background: #fff !important;
+    width:420mm !important; height:297mm !important;
+    margin:0 !important; padding:0 !important;
+    background:#fff !important;
+    display:block !important; overflow:hidden !important;
   }
+  .screen-only { display:none !important; }
+  .sheet {
+    position:absolute !important;
+    top:0 !important; left:0 !important;
+    width:420mm !important; height:297mm !important;
+    min-height:unset !important;
+    box-shadow:none !important; overflow:hidden !important;
+    transform:none !important;
+  }
+  * { -webkit-print-color-adjust:exact !important; print-color-adjust:exact !important; }
+}
 
-  .PageA4 {
-    width: 210mm;
-    height: 297mm;
-    margin: 0 auto;
-    box-shadow: none !important;
-    page-break-after: always;
-  }
+/* ── SCREEN ── */
+body {
+  background:#8a8a8a;
+  display:flex; flex-direction:column;
+  align-items:center;
+  padding:20px 16px 48px;
+  min-height:100vh; gap:12px;
+  font-family:Arial,sans-serif;
+  overflow-x:hidden;
+}
 
-  .Telecharger {
-    display: none !important;
-  }
+.screen-only {
+  display:flex; gap:10px; align-items:center;
+  flex-wrap:wrap; justify-content:center;
+}
+.screen-only button {
+  padding:9px 22px; background:#1a56db; color:#fff;
+  border:none; border-radius:6px;
+  font-size:13px; cursor:pointer; font-weight:600;
+}
+.screen-only button:hover { background:#1e429f; }
 
-  main {
-    height: 257mm !important;
-  }
+/* ── SHEET ── */
+.sheet {
+  width:100%;
+  aspect-ratio: 420 / 297;
+  background:#fff;
+  position:relative;
+  box-shadow:0 8px 36px rgba(0,0,0,0.55);
+  overflow:hidden;
+  border:1.5px solid #333;
+  font-family:Arial,sans-serif;
+  transform-origin: top left;
+}
 
-  .main4 {
-    height: 100% !important;
-    overflow: hidden !important;
-  }
+/* ══ BANDS ══════════════════════════════════════ */
+.band-top, .band-bottom {
+  position:absolute; left:0; right:0; height:18px;
+  display:flex; z-index:5;
+}
+.band-top { top:0; } .band-bottom { bottom:0; }
 
-  .main4 .Horizontal1,
-  .main4 .Horizontal2,
-  .main4 .Horizontal3 {
-    page-break-inside: avoid;
-  }
+.band-left, .band-right {
+  position:absolute; top:0; bottom:0; width:18px;
+  display:flex; flex-direction:column; z-index:5;
+}
+.band-left { left:0; } .band-right { right:0; }
 
-  .PageA4:nth-child(n+6) {
-    display: none !important;
-  }
+.col-cell {
+  flex:1; display:flex; align-items:center; justify-content:center;
+  font-size:6.5px; color:#222;
+  border-right:0.6px solid #555;
+}
+.col-cell:last-child { border-right:none; }
 
-  .PageA4:nth-child(5) {
-    page-break-after: auto !important;
-  }
+.row-cell {
+  flex:1; display:flex; align-items:center; justify-content:center;
+  border-bottom:0.6px solid #555;
+}
+.row-cell:last-child { border-bottom:none; }
 
-  .main4 .w3-card-4 {
-    page-break-inside: avoid;
-  }
+.row-label {
+  width:10px; height:10px; border:0.7px solid #333;
+  border-radius:50%; background:#fff;
+  display:flex; align-items:center; justify-content:center;
+  font-size:6px; font-weight:bold; color:#111;
+}
 
-  .variant-bullet {
-    -webkit-print-color-adjust: exact;
-    print-color-adjust: exact;
-    background-color: #000 !important;
-  }
+/* ══ INNER BORDER ══════════════════════════════ */
+.ib { position:absolute; background:#111; z-index:3; pointer-events:none; }
+.ib-top    { top:18px;    left:30px; right:30px; height:1px; }
+.ib-bottom { bottom:18px; left:30px; right:30px; height:1px; }
+.ib-left   { left:18px;   top:30px; bottom:30px; width:1px; }
+.ib-right  { right:18px;  top:30px; bottom:30px; width:1px; }
 
-  .variant-top-line,
-  .variant-bottom-line,
-  .variant-line-h {
-    -webkit-print-color-adjust: exact;
-    print-color-adjust: exact;
-    background-color: #333 !important;
-  }
+.ib-corner {
+  position:absolute; width:17px; height:1px;
+  background:#111; z-index:3; pointer-events:none;
+  transform-origin:50% 50%;
+}
+.ib-corner.tl { top:23px;    left:15px;  transform:rotate(-45deg); }
+.ib-corner.tr { top:23px;    right:15px; transform:rotate(45deg);  }
+.ib-corner.bl { bottom:23px; left:15px;  transform:rotate(45deg);  }
+.ib-corner.br { bottom:23px; right:15px; transform:rotate(-45deg); }
+
+/* ══ CONTENT AREA ══════════════════════════════ */
+.content-area {
+  position:absolute;
+  top:20px; left:20px; right:20px; bottom:20px;
+  display:flex; flex-direction:row;
+  align-items:stretch;
+  z-index:1; overflow:hidden;
+  min-width:0; min-height:0;
+}
+.content-area > * { min-width:0; min-height:0; }
+
+/* ── Drawing zone ── */
+.drawing-zone {
+  flex:1; position:relative; overflow:hidden;
+  border-right:1px solid #333;
+}
+.drawing-zone img {
+  position:absolute; top:0; left:0;
+  width:100%; height:100%;
+  object-fit:contain; object-position:center;
+}
+.drawing-placeholder {
+  width:100%; height:100%;
+  display:flex; flex-direction:column;
+  align-items:center; justify-content:center;
+  gap:6px; color:#ccc;
+}
+
+/* ── Title block column ── */
+.title-block-col {
+  width:17%; min-width:0; max-width:17%;
+  flex-shrink:0;
+  display:flex; flex-direction:column;
+  overflow:hidden;
+  border-left:0.8px solid #333;
+  font-family:Arial,sans-serif; font-size:5px;
+  box-sizing:border-box;
+  align-self:stretch;
+  height:100%;   /* needed so max-height% on children works */
+}
+
+/* ══ PARTS TABLE ══════════════════════════════ */
+.parts-table {
+  width:100%; max-width:100%;
+  table-layout:fixed;
+  border-collapse:collapse;
+  border-bottom:0.8px solid #555;
+  flex-shrink:0; overflow:hidden;
+}
+.parts-table th {
+  background:#e0e0e0; font-size:4.8px; font-weight:bold;
+  padding:1px 2px; text-align:left; overflow:hidden;
+  height:10px; border-bottom:0.5px solid #555;
+  border-right:0.5px solid #888; white-space:nowrap;
+}
+.parts-table th:last-child { border-right:none; }
+.parts-table td {
+  border-bottom:0.3px solid #ddd; border-right:0.5px solid #ccc;
+  padding:0 2px; height:9px; line-height:9px;
+  font-size:4.8px; white-space:nowrap; overflow:hidden;
+}
+.parts-table td:last-child { border-right:none; }
+.cn { width:14%; text-align:center; font-weight:bold; font-size:5px; color:#000; }
+.cd { color:#111; font-size:4.5px; }
+
+/* ══ TITLE BLOCK BODY ════════════════════════ */
+/* Spacer between parts table and title block
+   Change --spacer-flex in :root to control the gap */
+.tb-spacer { display:none; }
+
+.parts-table-wrap {
+  flex: 0 0 70%;     /* fixed at 40% of column height */
+  overflow: hidden;
+  min-height: 0;
+}
+
+.tb-body {
+  flex: 0 0 30%;     /* fixed at 60% of column height */
+  min-height: 0;
+  width:100%; max-width:100%;
+  box-sizing:border-box; overflow:hidden;
+  border-top:0.8px solid #555;
+  display:flex; flex-direction:column;
+}
+
+/* revision rows spread evenly to fill remaining space */
+.tb-rev-rows {
+  flex:1; min-height:0; overflow:hidden;
+  display:flex; flex-direction:column;
+}
+
+.tb-rev-row {
+  flex:1;                        /* each row grows equally */
+  display:flex; align-items:center;
+  border-bottom:0.2px solid #ccc;
+  min-height:0;
+}
+.tb-rev-row:last-child { border-bottom:none; }
+
+.tb-notes { display:flex; border-bottom:0.6px solid #555; }
+.tb-notes-col {
+  flex:1; padding:1px 2px;
+  border-right:0.4px solid #bbb;
+  font-size:3.8px; color:#333; line-height:1.45;
+}
+.tb-notes-col:last-child { border-right:none; }
+
+.tb-logo-row { display:flex; border-bottom:0.6px solid #555; height:22px; }
+.tb-logo {
+  flex:1; display:flex; align-items:center; justify-content:center;
+  border-right:0.6px solid #555;
+  font-size:9px; font-weight:bold; letter-spacing:1px; color:#000;
+}
+.tb-title-area {
+  flex:2; padding:2px 3px;
+  display:flex; flex-direction:column; justify-content:center; gap:1px;
+  border-right:0.6px solid #555; overflow:hidden;
+}
+.tb-title-area .t1 { font-size:4.5px; font-weight:bold; color:#000; white-space:nowrap; }
+.tb-title-area .t2 { font-size:3.8px; color:#555; white-space:nowrap; overflow:hidden; }
+
+.tb-ref-block { width:35%; padding:2px 3px; display:flex; flex-direction:column; justify-content:center; gap:2px; }
+.tb-ref-row { display:flex; gap:2px; align-items:baseline; }
+.tb-ref-lbl { font-size:3.8px; color:#888; width:22px; }
+.tb-ref-val { font-size:4px; font-weight:bold; color:#000; }
+
+.tb-fields { border-bottom:0.6px solid #555; }
+.tb-field-row { display:flex; border-bottom:0.2px solid #e0e0e0; height:7px; align-items:center; }
+.tb-field-row:last-child { border-bottom:none; }
+.tb-field-lbl { width:48%; padding:0 2px; font-size:3.8px; color:#666; border-right:0.4px solid #ccc; white-space:nowrap; overflow:hidden; }
+.tb-field-val { flex:1; padding:0 2px; font-size:3.8px; font-weight:bold; color:#000; white-space:nowrap; overflow:hidden; }
+
+.tb-rev-hdr { display:flex; background:#d8d8d8; border-bottom:0.6px solid #555; min-height:9px; height:auto; padding:2px 0; align-items:center; flex-shrink:0; }
+.tb-rev-rows {}
+.tb-rev-row { display:flex; border-bottom:0.2px solid #ccc; height:7px; align-items:center; }
+.tb-rev-row:last-child { border-bottom:none; }
+.rc-rev  { width:14px; min-width:14px; text-align:center; border-right:0.4px solid #999; font-size:4.5px; padding:0 1px; height:100%; display:flex; align-items:center; justify-content:center; }
+.rc-desc { flex:1; padding:0 2px; font-size:4px; border-right:0.4px solid #999; overflow:hidden; white-space:nowrap; height:100%; display:flex; align-items:center; }
+.rc-date { width:28px; min-width:28px; text-align:center; border-right:0.4px solid #999; font-size:4px; height:100%; display:flex; align-items:center; justify-content:center; }
+.rc-par  { width:14px; min-width:14px; text-align:center; border-right:0.4px solid #999; font-size:4px; height:100%; display:flex; align-items:center; justify-content:center; }
+.rc-app  { width:14px; min-width:14px; text-align:center; font-size:4px; height:100%; display:flex; align-items:center; justify-content:center; }
+
+.tb-bottom { display:flex; border-top:0.6px solid #555; height:16px; width:100%; }
+.tb-bot-cell { flex:1; display:flex; flex-direction:column; justify-content:center; padding:1px 2px; border-right:0.4px solid #bbb; overflow:hidden; }
+.tb-bot-cell:last-child { border-right:none; }
+.tb-bot-lbl { font-size:3.5px; color:#888; margin-bottom:1px; }
+.tb-bot-val { font-size:4px; font-weight:bold; color:#000; white-space:nowrap; overflow:hidden; }
+
+/* ══ BOTTOM LEGAL NOTICE ═════════════════════ */
+.legal-notice {
+  position:absolute;
+  bottom:18px; left:18px; right:18px;
+  height:18px;
+  display:flex; align-items:center;
+  padding:0 6px;
+  font-size:5px; color:#333;
+  font-family:Arial,sans-serif; font-style:italic;
+  z-index:6; background:#fff;
+  border-top:0.5px solid #999;
 }

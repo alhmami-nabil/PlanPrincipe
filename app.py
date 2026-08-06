@@ -1,109 +1,92 @@
-from flask import Flask, render_template, request, redirect, session, url_for, jsonify, flash
+from flask import Flask, render_template, request, redirect, jsonify, flash, Response
 import sqlite3
 import os
-import time
+import re
 import shutil
 import base64
+import subprocess
+import json as _json
+import xml.etree.ElementTree as ET
 from werkzeug.utils import secure_filename
+from datetime import datetime
 
 app = Flask(__name__)
 app.secret_key = "supersecretkey"
 
-DB_NAME = "FicheTechnique.db"
+DB_NAME       = "PLANDB.db"
+TABLE         = "Plan_DB"
 UPLOAD_FOLDER = "static/uploads"
-ALLOWED_EXTENSIONS = {'jpg', 'jpeg', 'png', 'gif', 'pdf'}
+
+# Max annotation number — columns added on-demand, never pre-created
+MAX_VUE_ECLATEE = 200
+
+# Largeur cible (px) du système de coordonnées PDF → SVG/PNG
+PDF_TARGET_WIDTH = 4000
+
+# ✅ Chemins possibles de pdftocairo (Poppler) — le premier trouvé est utilisé.
+# RECOMMANDÉ : mettre Poppler DANS le projet (dossier ./poppler à côté de
+# app.py) → il est déployé avec le code, rien à installer sur le serveur.
+# Télécharger : https://github.com/oschwartz10612/poppler-windows/releases
+PDFTOCAIRO_CANDIDATES = [
+    r"C:\poppler\Library\bin\pdftocairo.exe",
+    r"C:\poppler\bin\pdftocairo.exe",
+    "pdftocairo",  # si présent dans le PATH (Linux/Mac ou PATH Windows)
+]
+
+# Dossiers scannés récursivement pour trouver pdftocairo(.exe),
+# quel que soit le niveau d'imbrication créé par l'extraction du zip
+PDFTOCAIRO_SCAN_DIRS = [
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), 'poppler'),  # ./poppler dans le projet
+    r"C:\poppler",
+]
 
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 
-# Base path configuration
-BASE_PATH = '/tools/fiches'  # Change this to '' if not using subpath
-
-# Fields that should NOT be copied (text fields that need translation)
-TRANSLATABLE_FIELDS = {
-    'variant', 'description', 'variant_name',
-    'hauteur', 'largeur', 'epaisseur', 'epaisseur_battent', 'tolerance_hauteur',
-    'verre', 'battant', 'panneau', 'poids_porte_cloison', 'resistance_feu',
-    'nbn_s_01_400', 'nbn_en_iso_717_1'
-}
-for i in range(1, 23):
-    TRANSLATABLE_FIELDS.add(f'vue_eclatee_{i}')
-for i in range(1, 7):
-    TRANSLATABLE_FIELDS.add(f'dessin_technique_nom_{i}')
+BASE_PATH = ''
 
 
-# -------------------- HELPER: Get Base Path --------------------
-def get_base_url():
-    return BASE_PATH if BASE_PATH else ''
+def base_url():
+    return BASE_PATH
 
 
-# -------------------- DATABASE INIT --------------------
+def get_db():
+    conn = sqlite3.connect(DB_NAME)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+
 def init_db():
+    """Base table only — number_N/description_N added on demand."""
     conn = sqlite3.connect(DB_NAME)
     c = conn.cursor()
-    c.execute("""
-    CREATE TABLE IF NOT EXISTS fiche_technique (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        cpid TEXT NOT NULL,
-        reference TEXT NOT NULL,
-        reference_menu TEXT NOT NULL,
-        variant TEXT,
-        langue TEXT DEFAULT 'fr',
-	    type TEXT,
-        description TEXT,
-        variant_image TEXT,
-        variant_name TEXT,
-        photo_produit TEXT,
-        hauteur TEXT,
-        largeur TEXT,
-        epaisseur TEXT,
-	    epaisseur_battent TEXT,
-        tolerance_hauteur TEXT,
-        verre TEXT,
-	    battant TEXT,
-	    panneau TEXT,
-        poids_porte_cloison  TEXT,
-        resistance_feu TEXT,
-        nbn_s_01_400 TEXT,
-        nbn_en_iso_717_1 TEXT,
-        vue_eclatee_image TEXT,
-        vue_eclatee_1 TEXT,
-        vue_eclatee_2 TEXT,
-        vue_eclatee_3 TEXT,
-        vue_eclatee_4 TEXT,
-        vue_eclatee_5 TEXT,
-        vue_eclatee_6 TEXT,
-        vue_eclatee_7 TEXT,
-        vue_eclatee_8 TEXT,
-        vue_eclatee_9 TEXT,
-        vue_eclatee_10 TEXT,
-        vue_eclatee_11 TEXT,
-        vue_eclatee_12 TEXT,
-        vue_eclatee_13 TEXT,
-        vue_eclatee_14 TEXT,
-        vue_eclatee_15 TEXT,
-        vue_eclatee_16 TEXT,
-        vue_eclatee_17 TEXT,
-        vue_eclatee_18 TEXT,
-        vue_eclatee_19 TEXT,
-        vue_eclatee_20 TEXT,
-        vue_eclatee_21 TEXT,
-        vue_eclatee_22 TEXT,
-        vue_eclatee_count INTEGER DEFAULT 0,
-        dessin_technique_1 TEXT,
-        dessin_technique_2 TEXT,
-        dessin_technique_3 TEXT,
-        dessin_technique_4 TEXT,
-        dessin_technique_5 TEXT,
-        dessin_technique_6 TEXT,
-        dessin_technique_nom_1 TEXT,
-        dessin_technique_nom_2 TEXT,
-        dessin_technique_nom_3 TEXT,
-        dessin_technique_nom_4 TEXT,
-        dessin_technique_nom_5 TEXT,
-        dessin_technique_nom_6 TEXT
-    )
+    c.execute(f"""
+        CREATE TABLE IF NOT EXISTS {TABLE} (
+            id                INTEGER PRIMARY KEY AUTOINCREMENT,
+            name              TEXT NOT NULL UNIQUE,
+            ref_client        TEXT,
+            projet            TEXT,
+            Plan_de_principe  TEXT,
+            adress            TEXT,
+            Nom_du_fichier    TEXT,
+            Date_de_creation  TEXT,
+            plan              TEXT,
+            plan_count        INTEGER DEFAULT 0
+        )
     """)
+    # Add new columns to existing DB if missing
+    existing = {row[1] for row in c.execute(f"PRAGMA table_info({TABLE})").fetchall()}
+    new_cols = {
+        'ref_client':       'TEXT',
+        'projet':           'TEXT',
+        'Plan_de_principe': 'TEXT',
+        'adress':           'TEXT',
+        'Nom_du_fichier':   'TEXT',
+        'Date_de_creation': 'TEXT',
+    }
+    for col, typ in new_cols.items():
+        if col not in existing:
+            c.execute(f"ALTER TABLE {TABLE} ADD COLUMN {col} {typ}")
     conn.commit()
     conn.close()
 
@@ -111,837 +94,793 @@ def init_db():
 init_db()
 
 
-# -------------------- HELPER --------------------
-def get_db_connection():
-    conn = sqlite3.connect(DB_NAME)
-    conn.row_factory = sqlite3.Row
-    return conn
+def _existing_columns(conn):
+    rows = conn.execute(f"PRAGMA table_info({TABLE})").fetchall()
+    return {row[1] for row in rows}
 
 
-def calculate_vue_eclatee_count(data):
-    count = 0
-    for i in range(1, 23):
-        field_name = f"vue_eclatee_{i}"
-        value = data.get(field_name)
-        if value and value.strip():
-            count += 1
-    return count
+def ensure_columns(conn, numbers):
+    """Add number_N and description_N columns for each N if missing."""
+    existing = _existing_columns(conn)
+    for n in numbers:
+        if f'number_{n}' not in existing:
+            conn.execute(f"ALTER TABLE {TABLE} ADD COLUMN number_{n} TEXT")
+        if f'description_{n}' not in existing:
+            conn.execute(f"ALTER TABLE {TABLE} ADD COLUMN description_{n} TEXT")
+    conn.commit()
 
 
-def save_file(file, cpid="image", field_name="file"):
-    if file and file.filename:
-        filename = secure_filename(file.filename)
-        _, ext = os.path.splitext(filename)
+def count_vue_eclatee(data):
+    return sum(
+        1 for k, v in data.items()
+        if k.startswith('number_') and str(v or '').strip()
+    )
 
-        # Includes both cpid and field name: TEST123_photo_produit_1710672000.jpg
-        unique_filename = f"{cpid}_{field_name}{ext}"
 
-        file_path = os.path.join(app.config['UPLOAD_FOLDER'], unique_filename)
-        file.save(file_path)
+def _find_pdftocairo():
+    """
+    Retourne le premier exécutable pdftocairo disponible, sinon None.
+    1) Chemins connus (PDFTOCAIRO_CANDIDATES)
+    2) ✅ Scan récursif des dossiers PDFTOCAIRO_SCAN_DIRS — en priorité
+       le dossier ./poppler embarqué dans le projet (déployé avec le code)
+    """
+    for cand in PDFTOCAIRO_CANDIDATES:
+        if os.path.sep in cand or (os.altsep and os.altsep in cand):
+            if os.path.exists(cand):
+                return cand
+        else:
+            found = shutil.which(cand)
+            if found:
+                return found
 
-        return f"uploads/{unique_filename}"
+    for scan_root in PDFTOCAIRO_SCAN_DIRS:
+        if os.path.isdir(scan_root):
+            for dirpath, _dirs, files in os.walk(scan_root):
+                for fn in files:
+                    if fn.lower() in ('pdftocairo.exe', 'pdftocairo'):
+                        return os.path.join(dirpath, fn)
     return None
 
 
-def save_vue_eclatee_as_svg(file, cpid=None):
+def _pdf_to_png_bytes(pdf_path):
     """
-    Save the uploaded image and create an SVG wrapper around it.
-    The SVG embeds the image as base64, with no annotation layer yet.
-    If cpid is provided, the SVG is saved as <cpid>.svg.
-    Otherwise falls back to the original filename.
-    Returns the path to the .svg file: uploads/<cpid>.svg
-    Only ONE file is created — no _original copy needed.
+    Rend la 1ère page d'un PDF en PNG (PDF_TARGET_WIDTH px de large).
+    Utilisé UNIQUEMENT pour l'affichage dans l'éditeur canvas / preview.
+    Retourne (png_bytes, width, height).
+    """
+    try:
+        import fitz  # PyMuPDF
+    except ImportError:
+        raise RuntimeError("PyMuPDF non installé — exécutez : pip install PyMuPDF")
+    doc  = fitz.open(pdf_path)
+    if doc.page_count < 1:
+        doc.close()
+        raise RuntimeError("PDF vide — aucune page trouvée")
+    page = doc[0]
+    zoom = PDF_TARGET_WIDTH / page.rect.width
+    pix  = page.get_pixmap(matrix=fitz.Matrix(zoom, zoom), alpha=False)
+    png  = pix.tobytes('png')
+    w, h = pix.width, pix.height
+    doc.close()
+    return png, w, h
+
+
+def _pdf_page_size(pdf_path):
+    """Retourne (width_pt, height_pt) de la 1ère page du PDF."""
+    try:
+        import fitz
+    except ImportError:
+        raise RuntimeError("PyMuPDF non installé — exécutez : pip install PyMuPDF")
+    doc = fitz.open(pdf_path)
+    if doc.page_count < 1:
+        doc.close()
+        raise RuntimeError("PDF vide — aucune page trouvée")
+    w, h = doc[0].rect.width, doc[0].rect.height
+    doc.close()
+    return w, h
+
+
+def _pdf_to_vector_svg(pdf_path):
+    """
+    ✅ Convertit la 1ère page d'un PDF en SVG 100% VECTORIEL et FIDÈLE via
+    Poppler (pdftocairo) — qualité identique au PDF à toutes les échelles,
+    y compris l'impression A0.
+    Le SVG est ramené dans le système de coordonnées PDF_TARGET_WIDTH px
+    (le même que le PNG de l'éditeur) → annotations parfaitement alignées.
+    Retourne (svg_inner_markup, img_w, img_h). Lève une exception si
+    Poppler est indisponible ou si la conversion échoue.
+    """
+    exe = _find_pdftocairo()
+    if not exe:
+        raise RuntimeError(
+            "pdftocairo (Poppler) INTROUVABLE. Installez Poppler : "
+            "https://github.com/oschwartz10612/poppler-windows/releases "
+            "→ décompressez dans C:\\poppler → vérifiez que "
+            "C:\\poppler\\Library\\bin\\pdftocairo.exe existe, ou ajoutez "
+            "votre chemin dans PDFTOCAIRO_CANDIDATES (app.py). "
+            "Diagnostic : ouvrez /check_poppler dans le navigateur."
+        )
+
+    page_w, page_h = _pdf_page_size(pdf_path)
+    img_w = PDF_TARGET_WIDTH
+    img_h = round(page_h / page_w * PDF_TARGET_WIDTH)
+
+    out_svg = pdf_path + '.vec.svg'
+    try:
+        subprocess.run(
+            [exe, '-svg', '-f', '1', '-l', '1', pdf_path, out_svg],
+            check=True, capture_output=True, timeout=120
+        )
+        with open(out_svg, 'r', encoding='utf-8') as f:
+            svg_text = f.read()
+    finally:
+        if os.path.exists(out_svg):
+            os.remove(out_svg)
+
+    # Retirer une éventuelle déclaration XML
+    stripped = svg_text.lstrip()
+    if stripped.startswith('<?xml'):
+        svg_text = stripped.split('?>', 1)[1]
+
+    # La balise <svg> imbriquée garde son viewBox natif (points PDF) ;
+    # on force sa taille d'affichage à (img_w × img_h) → mise à l'échelle
+    # automatique dans le système de coordonnées des annotations.
+    def _fix_nested(mo):
+        tag = mo.group(0)
+        tag = re.sub(r'\swidth="[^"]*"',  '', tag)
+        tag = re.sub(r'\sheight="[^"]*"', '', tag)
+        return tag[:-1] + f' x="0" y="0" width="{img_w}" height="{img_h}" preserveAspectRatio="none">'
+    svg_text = re.sub(r'<svg\b[^>]*>', _fix_nested, svg_text, count=1)
+
+    return svg_text, img_w, img_h
+
+
+def make_svg(file, name=None):
+    """
+    Crée le SVG du plan.
+    PDF → conversion VECTORIELLE OBLIGATOIRE (pas de fallback raster :
+    si Poppler manque, on échoue avec un message clair plutôt que de
+    produire un plan pixelisé à l'impression A0).
+    Images (png/jpg) → encapsulation raster classique.
+    Retourne le chemin relatif, ou lève une exception avec la raison.
     """
     if not file or not file.filename:
         return None
-
     filename = secure_filename(file.filename)
-    _, ext = os.path.splitext(filename)
+    _, ext   = os.path.splitext(filename)
+    svg_name = (secure_filename(name) if name else os.path.splitext(filename)[0]) + '.svg'
 
-    # Use CPID as the SVG filename if provided, otherwise use original name
-    if cpid:
-        name = secure_filename(cpid)
-    else:
-        name, _ = os.path.splitext(filename)
-
-    # Save the raw image temporarily using original filename
     raw_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
     file.save(raw_path)
 
-    # Read and base64-encode the image
-    with open(raw_path, 'rb') as f:
-        img_data = base64.b64encode(f.read()).decode('utf-8')
+    try:
+        if ext.lower() == '.pdf':
+            # ✅ VECTORIEL OBLIGATOIRE — netteté identique au PDF en A0
+            inner_markup, img_w, img_h = _pdf_to_vector_svg(raw_path)
+            inner_markup = f'<g id="source-vector">{inner_markup}</g>'
+            print(f"[PLANDB] ✅ Conversion VECTORIELLE réussie pour {svg_name}")
+        else:
+            try:
+                from PIL import Image as PILImage
+                with PILImage.open(raw_path) as im:
+                    img_w, img_h = im.size
+            except Exception:
+                img_w, img_h = 700, 900
 
-    mime = 'image/png' if ext.lower() == '.png' else 'image/jpeg'
+            with open(raw_path, 'rb') as f:
+                img_b64 = base64.b64encode(f.read()).decode()
 
-    # Build SVG with embedded image and empty annotations group
-    svg_content = f'''<?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"
-     width="700" height="900" viewBox="0 0 700 900">
-  <!-- Embedded source image — never modified -->
-  <image id="source-image" x="0" y="0" width="700" height="900"
-         xlink:href="data:{mime};base64,{img_data}"
-         preserveAspectRatio="none"/>
-  <!-- Annotations layer — updated by editor -->
-  <g id="annotations"></g>
-</svg>'''
+            mime = 'image/png' if ext.lower() == '.png' else 'image/jpeg'
+            inner_markup = (
+                f'<image id="source-image" x="0" y="0" width="{img_w}" height="{img_h}" '
+                f'xlink:href="data:{mime};base64,{img_b64}" preserveAspectRatio="none"/>'
+            )
+    finally:
+        if os.path.exists(raw_path):
+            os.remove(raw_path)
 
-    svg_filename = name + '.svg'
-    svg_path = os.path.join(app.config['UPLOAD_FOLDER'], svg_filename)
+    svg_content = (
+        '<?xml version="1.0" encoding="UTF-8"?>\n'
+        '<svg xmlns="http://www.w3.org/2000/svg" '
+        'xmlns:xlink="http://www.w3.org/1999/xlink" '
+        f'width="{img_w}" height="{img_h}" viewBox="0 0 {img_w} {img_h}" '
+        'preserveAspectRatio="none">\n'
+        f'  {inner_markup}\n'
+        '  <g id="annotations"></g>\n'
+        '</svg>'
+    )
+    svg_path = os.path.join(app.config['UPLOAD_FOLDER'], svg_name)
     with open(svg_path, 'w', encoding='utf-8') as f:
         f.write(svg_content)
-
-    # Remove the temporary raw image
-    os.remove(raw_path)
-
-    return f"uploads/{svg_filename}"
+    return f"uploads/{svg_name}"
 
 
-def allowed_file(filename):
-    return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
-
-
-def extract_translations(form_data, lang_suffix):
-    translations = {}
-    suffix = f"_{lang_suffix}"
-    for key, value in form_data.items():
-        if key.endswith(suffix):
-            original_key = key[:-len(suffix)]
-            translations[original_key] = value.strip() if value else None
-    return translations
-
-
-def is_valid_svg_for_cpid(vue_already_saved, cpid):
-    """
-    Validate that the vue_eclatee_already_saved value actually belongs
-    to the given CPID. Returns True only if the filename matches
-    the expected <cpid>.svg pattern.
-    """
-    if not vue_already_saved or not cpid:
-        return False
-    expected_svg = secure_filename(cpid) + '.svg'
-    return vue_already_saved.strip() == expected_svg
-
-
-def copy_svg_for_new_cpid(existing_svg_path, new_cpid):
-    """
-    When creating a new CPID by copying from an existing one, if the existing
-    record has an SVG vue éclatée, copy that SVG file and rename it after the
-    new CPID so each record has its own independent SVG file.
-
-    existing_svg_path: relative path stored in DB, e.g. "uploads/A123456789.svg"
-    new_cpid: the CPID of the new record, e.g. "A987654321"
-
-    Returns the new relative path "uploads/<new_cpid>.svg", or the original path
-    if the source is not an SVG or does not exist (safe fallback).
-    """
-    if not existing_svg_path or not new_cpid:
-        return existing_svg_path
-
-    # Only handle SVG files — old PNG/JPG records are kept as-is
-    if not existing_svg_path.lower().endswith('.svg'):
-        return existing_svg_path
-
-    src_path = os.path.join('static', existing_svg_path)
-    if not os.path.exists(src_path):
-        return existing_svg_path
-
-    new_svg_filename = secure_filename(new_cpid) + '.svg'
-    dst_path = os.path.join(app.config['UPLOAD_FOLDER'], new_svg_filename)
-
+def copy_svg(src_rel, new_name):
+    if not src_rel or not new_name or not src_rel.lower().endswith('.svg'):
+        return src_rel
+    src = os.path.join('static', src_rel)
+    if not os.path.exists(src):
+        return src_rel
+    dst_name = secure_filename(new_name) + '.svg'
+    dst      = os.path.join(app.config['UPLOAD_FOLDER'], dst_name)
     try:
-        shutil.copy2(src_path, dst_path)
-        return f"uploads/{new_svg_filename}"
+        shutil.copy2(src, dst)
+        return f"uploads/{dst_name}"
     except Exception:
-        # If copy fails, fall back to referencing the original file
-        return existing_svg_path
+        return src_rel
 
 
-# -------------------- HOME --------------------
-@app.route("/", methods=["GET"])
-@app.route(f"{BASE_PATH}/", methods=["GET"])
-def home():
-    type_selected = request.args.get("type", "Cloison")
-    cpid_selected = request.args.get("cpid", "").strip()
-    base = get_base_url()
-
-    conn = get_db_connection()
-    rows = conn.execute(
-        "SELECT DISTINCT cpid FROM fiche_technique WHERE type=? AND langue='fr'",
-        (type_selected,)
-    ).fetchall()
-    cpids = [row['cpid'].strip() for row in rows]
-
-    if cpid_selected and cpid_selected not in cpids:
-        cpids.append(cpid_selected)
-
-    conn.close()
-    cpids = sorted(cpids, key=str.lower)
-
-    if type_selected == "Cloison":
-        return render_template("homeCloison.html",
-                               cpids=cpids,
-                               type_selected=type_selected,
-                               base=base,
-                               cpid_selected=cpid_selected)
-    else:
-        return render_template("homePorte.html",
-                               cpids=cpids,
-                               type_selected=type_selected,
-                               base=base,
-                               cpid_selected=cpid_selected)
+def valid_svg_for_name(saved, name):
+    if not saved or not name:
+        return False
+    return saved.strip() == secure_filename(name) + '.svg'
 
 
-# -------------------- ADD FICHE --------------------
-@app.route("/add_fiche", methods=["POST"])
-@app.route(f"{BASE_PATH}/add_fiche", methods=["POST"])
-def add_fiche():
-    cpid = request.form.get("cpid")
-    ref_type = request.form.get("type", "Cloison")
-    previous_ref = request.form.get("previous_ref")
-    base = get_base_url()
+def inject_annotations(root, annotations):
+    ns  = {'svg': 'http://www.w3.org/2000/svg'}
+    old = root.find('.//svg:g[@id="annotations"]', ns)
+    if old is not None:
+        root.remove(old)
+    grp = ET.SubElement(root, '{http://www.w3.org/2000/svg}g')
+    grp.set('id', 'annotations')
 
-    if not cpid:
-        flash("CPID est obligatoire", "warning")
-        return redirect(f"{base}/?type={ref_type}")
+    vb = root.get('viewBox', '0 0 700 900').split()
+    try:
+        img_w, img_h = float(vb[2]), float(vb[3])
+    except Exception:
+        img_w, img_h = 700, 900
 
-    conn = get_db_connection()
-    conn.row_factory = sqlite3.Row
+    for ann in annotations:
+        dx   = float(ann['x'])
+        dy   = float(ann['y'])
+        aid  = int(ann['id'])
+        side = ann.get('side', 'free')
+        sz   = float(ann.get('annotationSize', 1.0))
 
-    existing = conn.execute("SELECT * FROM fiche_technique WHERE cpid=?", (cpid,)).fetchall()
-    if existing:
-        flash("Cette CPID existe déjà. Utilisez 'Mettre à jour' pour la modifier.", "danger")
-        conn.close()
-        return redirect(f"{base}/?type={ref_type}")
-
-    previous_images = {}
-    if previous_ref:
-        prev = conn.execute(
-            "SELECT * FROM fiche_technique WHERE cpid=? AND langue='fr'", (previous_ref,)
-        ).fetchone()
-        if prev:
-            previous_images = dict(prev)
-
-    data_fr = {}
-    for key, value in request.form.items():
-        if key not in ["previous_ref", "updateRef", "deleteRef", "vue_eclatee_already_saved"] and not key.startswith(
-                "delete_") and not key.endswith(
-            "_nl") and not key.endswith("_en"):
-            data_fr[key] = value.strip() if value else None
-
-    data_fr["type"] = ref_type
-    data_fr["langue"] = "fr"
-
-    en_translations = extract_translations(request.form, "en")
-    nl_translations = extract_translations(request.form, "nl")
-
-    file_fields = [
-        "variant_image", "photo_produit",
-        "dessin_technique_1", "dessin_technique_2", "dessin_technique_3",
-        "dessin_technique_4", "dessin_technique_5", "dessin_technique_6"
-    ]
-
-    for f in file_fields:
-        file = request.files.get(f)
-        if file and file.filename.strip():
-            uploaded = save_file(file, cpid=cpid, field_name=f)
-            data_fr[f] = uploaded
+        if 'labelX' in ann and 'labelY' in ann:
+            lx = float(ann['labelX'])
+            ly = float(ann['labelY'])
+        elif side == 'left':
+            lx = img_w * 0.07
+            ly = dy
         else:
-            data_fr[f] = previous_images.get(f)
+            lx = img_w * 0.93
+            ly = dy
 
-    # ── Vue éclatée (SVG-based) ──
-    # vue_eclatee_already_saved: set by editor after save_annotations — SVG already on disk
-    # SECURITY: only trust this value if it actually belongs to the current CPID
-    vue_already_saved = request.form.get("vue_eclatee_already_saved", "").strip()
-    vue_file = request.files.get("vue_eclatee_image")
+        g    = ET.SubElement(grp, '{http://www.w3.org/2000/svg}g')
+        desc = str(ann.get('description', '') or '')
+        for k, v in [('data-id', str(aid)), ('data-x', str(dx)), ('data-y', str(dy)),
+                     ('data-side', side), ('data-lx', str(lx)), ('data-ly', str(ly)),
+                     ('data-size', str(sz)), ('data-desc', desc)]:
+            g.set(k, v)
 
-    if vue_already_saved and is_valid_svg_for_cpid(vue_already_saved, cpid):
-        # SVG already created and annotated by editor for THIS CPID — store the path
-        data_fr["vue_eclatee_image"] = f"uploads/{vue_already_saved}"
-    elif vue_file and vue_file.filename.strip():
-        # New image uploaded without editor — wrap in SVG named after CPID
-        data_fr["vue_eclatee_image"] = save_vue_eclatee_as_svg(vue_file, cpid=cpid)
+        line_w = max(0.2, (img_w / 350) * sz)
+        ln = ET.SubElement(g, '{http://www.w3.org/2000/svg}line')
+        for k, v in [('x1', str(dx)), ('y1', str(dy)), ('x2', str(lx)), ('y2', str(ly)),
+                     ('stroke', 'black'), ('stroke-width', str(line_w))]:
+            ln.set(k, v)
+
+        dot_r = max(0.5, (img_w / 233) * sz)
+        dot = ET.SubElement(g, '{http://www.w3.org/2000/svg}circle')
+        for k, v in [('cx', str(dx)), ('cy', str(dy)), ('r', str(dot_r)), ('fill', 'black')]:
+            dot.set(k, v)
+
+        label_r = max(2, (img_w / 35) * sz)
+        circle = ET.SubElement(g, '{http://www.w3.org/2000/svg}circle')
+        for k, v in [('cx', str(lx)), ('cy', str(ly)), ('r', str(label_r)), ('fill', 'black')]:
+            circle.set(k, v)
+
+        font_sz = max(2, (img_w / 35) * sz)
+        t = ET.SubElement(g, '{http://www.w3.org/2000/svg}text')
+        for k, v in [('x', str(lx)), ('y', str(ly)),
+                     ('text-anchor', 'middle'), ('dominant-baseline', 'central'),
+                     ('fill', 'white'), ('font-size', str(font_sz)),
+                     ('font-weight', 'bold'), ('font-family', 'Arial, sans-serif')]:
+            t.set(k, v)
+        t.text = str(aid)
+
+
+_SKIP = frozenset({'previous_ref', 'updateRef', 'deleteRef', 'plan_already_saved'})
+
+# Fields that are plain text columns (not composant slots)
+_INFO_FIELDS = frozenset({
+    'name', 'ref_client', 'projet', 'Plan_de_principe',
+    'adress', 'Nom_du_fichier', 'Date_de_creation'
+})
+
+
+def _collect(form, name):
+    """
+    Collect form data.
+    For number_N fields: the VALUE typed by user IS the annotation number.
+    So if slot number_2 contains "50", we store it in column number_50.
+    Empty slots are ignored — no column created.
+    """
+    data = {}
+
+    # Non-composant fields
+    for k, v in form.items():
+        if k in _SKIP or k.startswith('delete_'):
+            continue
+        if k.startswith('number_') or k.startswith('description_'):
+            continue  # handled below
+        data[k] = v.strip() if v else None
+
+    # Composant fields: remap slot → actual annotation number
+    for k, v in form.items():
+        if not k.startswith('number_'):
+            continue
+        val = (v or '').strip()
+        if not val:
+            continue
+        try:
+            slot = int(k.split('_', 1)[1])   # form slot index
+            num  = int(val)                   # actual annotation number typed
+            if num < 1:
+                continue
+        except ValueError:
+            continue
+        desc_val = (form.get(f'description_{slot}') or '').strip()
+        # Store under the real annotation number
+        data[f'number_{num}']      = str(num)
+        data[f'description_{num}'] = desc_val if desc_val else None
+
+    data['name'] = name
+    data.pop('cpid', None)
+    return data
+
+
+def _svg_inline_for_plan(plan_rel):
+    """
+    Lit le fichier SVG du plan et le prépare pour une injection INLINE
+    dans plan.html : suppression de la déclaration XML et forçage de
+    width="100%" height="100%" sur la balise racine <svg>.
+    Un SVG inline reste vectoriel à l'impression (netteté A0).
+    """
+    if not plan_rel:
+        return None
+    path = os.path.join(app.root_path, 'static', plan_rel)
+    if not os.path.exists(path):
+        return None
+    try:
+        with open(path, 'r', encoding='utf-8') as f:
+            svg = f.read()
+        # Retirer la déclaration XML (interdite en HTML inline)
+        stripped = svg.lstrip()
+        if stripped.startswith('<?xml'):
+            svg = stripped.split('?>', 1)[1]
+        # Forcer width/height à 100% UNIQUEMENT sur la balise racine <svg>
+        def _fix_root(mo):
+            tag = mo.group(0)
+            tag = re.sub(r'\swidth="[^"]*"',  ' width="100%"',  tag, count=1)
+            tag = re.sub(r'\sheight="[^"]*"', ' height="100%"', tag, count=1)
+            return tag
+        svg = re.sub(r'<svg\b[^>]*>', _fix_root, svg, count=1)
+        return svg
+    except Exception:
+        return None
+
+
+# ─── ROUTES ───────────────────────────────────────────────────────────────────
+
+@app.route('/', methods=['GET'])
+@app.route(f'{BASE_PATH}/', methods=['GET'])
+def home():
+    name_selected = request.args.get('name', '').strip()
+    base          = base_url()
+    conn  = get_db()
+    rows  = conn.execute(f"SELECT DISTINCT name FROM {TABLE} ORDER BY name").fetchall()
+    conn.close()
+    names = [r['name'] for r in rows if r['name']]
+    if name_selected and name_selected not in names:
+        names.append(name_selected)
+    return render_template('home.html', names=names,
+                           name_selected=name_selected, base=base,
+                           max_vue=MAX_VUE_ECLATEE)
+
+
+@app.route('/check_poppler')
+@app.route(f'{BASE_PATH}/check_poppler')
+def check_poppler():
+    """
+    ✅ Page de DIAGNOSTIC : vérifie l'installation de Poppler (pdftocairo).
+    Ouvrez http://<serveur>:5000/check_poppler dans le navigateur.
+    """
+    lines = ['<h2>Diagnostic Poppler / pdftocairo</h2><pre style="font-size:14px">']
+    exe = _find_pdftocairo()
+    for cand in PDFTOCAIRO_CANDIDATES:
+        if os.path.sep in cand or (os.altsep and os.altsep in cand):
+            status = '✅ TROUVÉ' if os.path.exists(cand) else '❌ absent'
+        else:
+            status = f'✅ TROUVÉ ({shutil.which(cand)})' if shutil.which(cand) else '❌ absent du PATH'
+        lines.append(f'{status}  —  {cand}')
+    lines.append('')
+    if not exe:
+        lines.append('❌ RÉSULTAT : pdftocairo INTROUVABLE.')
+        lines.append('→ Installez Poppler : https://github.com/oschwartz10612/poppler-windows/releases')
+        lines.append('→ Décompressez dans C:\\poppler puis rechargez cette page.')
+        lines.append('→ Si votre chemin est différent, ajoutez-le dans PDFTOCAIRO_CANDIDATES (app.py).')
     else:
-        # No new image and no valid saved SVG.
-        # If copying from a previous CPID (e.g. user loaded A123456789 then typed A987654321),
-        # the previous SVG is named after A123456789 — we must copy it and rename it
-        # to A987654321.svg so each CPID owns its own independent file.
-        old = previous_images.get("vue_eclatee_image")
-        data_fr["vue_eclatee_image"] = copy_svg_for_new_cpid(old, cpid) if old else None
+        lines.append(f'✅ Exécutable retenu : {exe}')
+        try:
+            r = subprocess.run([exe, '-v'], capture_output=True, timeout=15)
+            ver = (r.stderr or r.stdout).decode(errors='replace').strip().splitlines()[0]
+            lines.append(f'✅ Version : {ver}')
+            lines.append('')
+            lines.append('✅ TOUT EST BON : la conversion vectorielle fonctionnera.')
+            lines.append('→ Re-uploadez le PDF de chaque fiche puis Mettre à jour.')
+        except Exception as e:
+            lines.append(f'❌ Exécution impossible : {e}')
+    lines.append('</pre>')
+    return '<br>'.join(lines)
 
-    data_fr["vue_eclatee_count"] = calculate_vue_eclatee_count(data_fr)
+
+@app.route('/convert_pdf', methods=['POST'])
+@app.route(f'{BASE_PATH}/convert_pdf', methods=['POST'])
+def convert_pdf():
+    """
+    ✅ Reçoit un PDF, rend la 1ère page en PNG (PDF_TARGET_WIDTH px de large)
+    et retourne un data URL — UNIQUEMENT pour l'affichage éditeur/preview.
+    Vérifie aussi que Poppler est disponible pour prévenir immédiatement
+    l'utilisateur si la conversion vectorielle finale échouera.
+    """
+    file = request.files.get('pdf')
+    if not file or not file.filename:
+        return jsonify({'success': False, 'error': 'Aucun fichier PDF fourni'}), 400
+    if not file.filename.lower().endswith('.pdf'):
+        return jsonify({'success': False, 'error': 'Seuls les fichiers PDF sont acceptés'}), 400
+
+    # ✅ Contrôle Poppler dès l'upload — échec immédiat et explicite
+    if not _find_pdftocairo():
+        return jsonify({'success': False, 'error':
+                        "Poppler (pdftocairo) est INTROUVABLE sur le serveur — "
+                        "l'impression A0 serait pixelisée. Ouvrez /check_poppler "
+                        "pour le diagnostic et installez Poppler."}), 500
+
+    tmp_path = os.path.join(app.config['UPLOAD_FOLDER'],
+                            '_tmp_' + secure_filename(file.filename))
+    try:
+        file.save(tmp_path)
+        png_bytes, w, h = _pdf_to_png_bytes(tmp_path)
+        b64 = base64.b64encode(png_bytes).decode()
+        return jsonify({'success': True,
+                        'dataUrl': f'data:image/png;base64,{b64}',
+                        'width': w, 'height': h})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+    finally:
+        if os.path.exists(tmp_path):
+            os.remove(tmp_path)
+
+
+@app.route('/add_fiche', methods=['POST'])
+@app.route(f'{BASE_PATH}/add_fiche', methods=['POST'])
+def add_fiche():
+    name         = (request.form.get('name') or '').strip()
+    previous_ref = request.form.get('previous_ref', '').strip()
+    base         = base_url()
+
+    if not name:
+        flash('Le champ Name est obligatoire.', 'warning')
+        return redirect(f'{base}/')
+
+    conn = get_db()
+    if conn.execute(f"SELECT id FROM {TABLE} WHERE name=?", (name,)).fetchone():
+        flash(f"Le Name « {name} » existe déjà. Utilisez « Mettre à jour ».", 'danger')
+        conn.close()
+        return redirect(f'{base}/')
+
+    prev_imgs = {}
+    if previous_ref:
+        prev = conn.execute(f"SELECT * FROM {TABLE} WHERE name=?", (previous_ref,)).fetchone()
+        if prev:
+            prev_imgs = dict(prev)
+
+    data  = _collect(request.form, name)
+    saved = request.form.get('plan_already_saved', '').strip()
+    vf    = request.files.get('plan')
 
     try:
-        cols_fr = ", ".join(data_fr.keys())
-        placeholders_fr = ", ".join(["?"] * len(data_fr))
-        conn.execute(f"INSERT INTO fiche_technique ({cols_fr}) VALUES ({placeholders_fr})", list(data_fr.values()))
+        if valid_svg_for_name(saved, name):
+            data['plan'] = f'uploads/{saved}'
+        elif vf and vf.filename.strip():
+            data['plan'] = make_svg(vf, name=name)
+        else:
+            old = prev_imgs.get('plan')
+            data['plan'] = copy_svg(old, name) if old else None
+    except Exception as e:
+        conn.close()
+        flash(f"Erreur conversion du plan : {e}", 'danger')
+        return redirect(f'{base}/')
 
-        data_en = data_fr.copy()
-        data_en["langue"] = "en"
-        for field in TRANSLATABLE_FIELDS:
-            if field in data_en:
-                data_en[field] = None
-        for key, value in en_translations.items():
-            if key in data_en and value and value.strip():
-                data_en[key] = value
-        cols_en = ", ".join(data_en.keys())
-        placeholders_en = ", ".join(["?"] * len(data_en))
-        conn.execute(f"INSERT INTO fiche_technique ({cols_en}) VALUES ({placeholders_en})", list(data_en.values()))
+    data['plan_count'] = count_vue_eclatee(data)
 
-        data_nl = data_fr.copy()
-        data_nl["langue"] = "nl"
-        for field in TRANSLATABLE_FIELDS:
-            if field in data_nl:
-                data_nl[field] = None
-        for key, value in nl_translations.items():
-            if key in data_nl and value and value.strip():
-                data_nl[key] = value
-        cols_nl = ", ".join(data_nl.keys())
-        placeholders_nl = ", ".join(["?"] * len(data_nl))
-        conn.execute(f"INSERT INTO fiche_technique ({cols_nl}) VALUES ({placeholders_nl})", list(data_nl.values()))
-
+    try:
+        nums = [k.split('_', 1)[1] for k in data
+                if k.startswith('number_') or k.startswith('description_')]
+        if nums:
+            ensure_columns(conn, list(set(nums)))
+        data = {k: v for k, v in data.items() if v is not None}
+        cols = ', '.join(data.keys())
+        ph   = ', '.join(['?'] * len(data))
+        conn.execute(f'INSERT INTO {TABLE} ({cols}) VALUES ({ph})', list(data.values()))
         conn.commit()
-        flash(f"CPID '{cpid}' ajoutée avec succès en FR, EN et NL !", "success")
+        flash(f"Name « {name} » ajouté !", 'success')
     except Exception as e:
         conn.rollback()
-        flash(f"Erreur lors de l'ajout : {e}", "danger")
+        flash(f"Erreur ajout : {e}", 'danger')
     finally:
         conn.close()
 
-    return redirect(f"{base}/?type={ref_type}&cpid={cpid}")
+    return redirect(f'{base}/?name={name}')
 
 
-# -------------------- GET FICHE --------------------
-@app.route("/get_fiche/<cpid>")
-@app.route(f"{BASE_PATH}/get_fiche/<cpid>")
-def get_fiche(cpid):
-    conn = get_db_connection()
-
-    fr = conn.execute(
-        "SELECT * FROM fiche_technique WHERE cpid=? AND langue='fr'", (cpid,)
-    ).fetchone()
-    en = conn.execute(
-        "SELECT * FROM fiche_technique WHERE cpid=? AND langue='en'", (cpid,)
-    ).fetchone()
-    nl = conn.execute(
-        "SELECT * FROM fiche_technique WHERE cpid=? AND langue='nl'", (cpid,)
-    ).fetchone()
-
+@app.route('/get_fiche/<name>')
+@app.route(f'{BASE_PATH}/get_fiche/<name>')
+def get_fiche(name):
+    conn = get_db()
+    row  = conn.execute(f"SELECT * FROM {TABLE} WHERE name=?", (name,)).fetchone()
     conn.close()
-
-    if not fr:
-        return jsonify({"error": "CPID introuvable"}), 404
-
-    fr_dict = dict(fr)
-
-    return jsonify({
-        "fr": fr_dict,
-        "en": dict(en) if en else None,
-        "nl": dict(nl) if nl else None
-    })
+    if not row:
+        return jsonify({'error': 'Name introuvable'}), 404
+    return jsonify({'fr': dict(row), 'en': None, 'nl': None})
 
 
-# -------------------- GET SOURCE IMAGE FROM SVG --------------------
+@app.route('/update_fiche', methods=['POST'])
+@app.route(f'{BASE_PATH}/update_fiche', methods=['POST'])
+def update_fiche():
+    name = (request.form.get('updateRef') or '').strip()
+    base = base_url()
+
+    if not name:
+        flash('Sélectionnez un Name à mettre à jour.', 'warning')
+        return redirect(f'{base}/')
+
+    conn     = get_db()
+    existing = conn.execute(f"SELECT * FROM {TABLE} WHERE name=?", (name,)).fetchone()
+    if not existing:
+        flash('Name introuvable.', 'danger')
+        conn.close()
+        return redirect(f'{base}/')
+
+    data  = _collect(request.form, name)
+    saved = request.form.get('plan_already_saved', '').strip()
+    vf    = request.files.get('plan')
+
+    try:
+        if request.form.get('delete_plan') == 'true':
+            data['plan'] = None
+        elif valid_svg_for_name(saved, name):
+            data['plan'] = f'uploads/{saved}'
+        elif vf and vf.filename.strip():
+            data['plan'] = make_svg(vf, name=name)
+        else:
+            data['plan'] = existing['plan']
+    except Exception as e:
+        conn.close()
+        flash(f"Erreur conversion du plan : {e}", 'danger')
+        return redirect(f'{base}/?name={name}')
+
+    data['plan_count'] = count_vue_eclatee(data)
+
+    try:
+        nums = [k.split('_', 1)[1] for k in data
+                if k.startswith('number_') or k.startswith('description_')]
+        if nums:
+            ensure_columns(conn, list(set(nums)))
+
+        existing_cols = _existing_columns(conn)
+        null_cols = [
+            c for c in existing_cols
+            if (c.startswith('number_') or c.startswith('description_'))
+            and c not in data
+        ]
+        for col in null_cols:
+            data[col] = None
+
+        set_clause = ', '.join([f'{k}=?' for k in data])
+        conn.execute(f"UPDATE {TABLE} SET {set_clause} WHERE name=?",
+                     list(data.values()) + [name])
+        conn.commit()
+        flash(f"Name « {name} » mis à jour !", 'success')
+    except Exception as e:
+        conn.rollback()
+        flash(f"Erreur mise à jour : {e}", 'danger')
+    finally:
+        conn.close()
+
+    return redirect(f'{base}/?name={name}')
+
+
+@app.route('/delete_fiche', methods=['POST'])
+@app.route(f'{BASE_PATH}/delete_fiche', methods=['POST'])
+def delete_fiche():
+    name = (request.form.get('deleteRef') or '').strip()
+    base = base_url()
+    if not name:
+        flash('Sélectionnez un Name à supprimer.', 'warning')
+        return redirect(f'{base}/')
+    try:
+        conn = get_db()
+        conn.execute(f"DELETE FROM {TABLE} WHERE name=?", (name,))
+        conn.commit()
+        conn.close()
+        flash(f"Name « {name} » supprimé !", 'success')
+    except Exception as e:
+        flash(f"Erreur suppression : {e}", 'danger')
+    return redirect(f'{base}/')
+
+
 @app.route('/get_source_image/<filename>')
-@app.route(f"{BASE_PATH}/get_source_image/<filename>")
+@app.route(f'{BASE_PATH}/get_source_image/<filename>')
 def get_source_image(filename):
-    """
-    Extract the raw embedded image bytes from an SVG file and serve them directly.
-    If the file is not an SVG (e.g. old PNG record), return 404 so JS shows the alert.
-    """
-    safe_filename = secure_filename(filename)
-    svg_path = os.path.join(app.config['UPLOAD_FOLDER'], safe_filename)
-
-    # Must be an .svg file — old records stored .png/.jpg, reject cleanly
-    if not safe_filename.lower().endswith('.svg'):
-        return "Not an SVG file — please re-upload the image", 404
-
-    if not os.path.exists(svg_path):
-        return "SVG not found", 404
-
-    import xml.etree.ElementTree as ET
+    sf   = secure_filename(filename)
+    path = os.path.join(app.config['UPLOAD_FOLDER'], sf)
+    if not sf.lower().endswith('.svg'):
+        return 'Not an SVG', 404
+    if not os.path.exists(path):
+        return 'SVG not found', 404
     try:
-        tree = ET.parse(svg_path)
-        root = tree.getroot()
-
-        img_el = root.find('.//{http://www.w3.org/2000/svg}image[@id="source-image"]')
-        if img_el is None:
-            img_el = root.find('.//image[@id="source-image"]')
-
-        if img_el is None:
-            return "Source image element not found in SVG", 404
-
-        href = img_el.get('href') or img_el.get('{http://www.w3.org/1999/xlink}href')
-        if not href or not href.startswith('data:'):
-            return "No embedded data URI found", 404
-
-        header, b64data = href.split(',', 1)
+        root = ET.parse(path).getroot()
+        img  = (root.find('.//{http://www.w3.org/2000/svg}image[@id="source-image"]')
+                or root.find('.//image[@id="source-image"]'))
+        if img is None:
+            return 'source-image not found', 404
+        href = img.get('href') or img.get('{http://www.w3.org/1999/xlink}href') or ''
+        if not href.startswith('data:'):
+            return 'No embedded data URI', 404
+        header, b64 = href.split(',', 1)
         mime = header.split(':')[1].split(';')[0]
-        raw_bytes = base64.b64decode(b64data)
-
-        from flask import Response
-        return Response(raw_bytes, mimetype=mime,
-                        headers={"Cache-Control": "no-cache"})
-
+        return Response(base64.b64decode(b64), mimetype=mime,
+                        headers={'Cache-Control': 'no-cache'})
     except Exception as e:
-        return f"Error extracting image: {e}", 500
+        return f'Error: {e}', 500
 
 
-@app.route("/get_svg_annotations/<path:filename>")
-@app.route(f"{BASE_PATH}/get_svg_annotations/<path:filename>")
+@app.route('/get_svg_annotations/<path:filename>')
+@app.route(f'{BASE_PATH}/get_svg_annotations/<path:filename>')
 def get_svg_annotations(filename):
-    """
-    Parse an existing SVG file and return its annotations as JSON.
-    If the file is not an SVG (old PNG/JPG record), return empty annotations cleanly.
-    """
-    # Old records may store .png/.jpg — not parseable as SVG, return empty gracefully
     if not filename.lower().endswith('.svg'):
-        return jsonify({"error": "Not an SVG file", "annotations": []}), 200
-
-    svg_path = os.path.join(app.root_path, 'static', filename)
-    if not os.path.exists(svg_path):
-        return jsonify({"error": "SVG not found", "annotations": []}), 200
-
-    import xml.etree.ElementTree as ET
+        return jsonify({'annotations': []}), 200
+    path = os.path.join(app.root_path, 'static', filename)
+    if not os.path.exists(path):
+        return jsonify({'annotations': []}), 200
     try:
-        tree = ET.parse(svg_path)
-        root = tree.getroot()
-        ns = {'svg': 'http://www.w3.org/2000/svg'}
-
-        annotations = []
-        ann_group = root.find('.//svg:g[@id="annotations"]', ns)
-        if ann_group is not None:
-            for ann_g in ann_group.findall('svg:g', ns):
-                ann_id = ann_g.get('data-id')
-                ann_x = ann_g.get('data-x')
-                ann_y = ann_g.get('data-y')
-                ann_side = ann_g.get('data-side')
-                if ann_id and ann_x and ann_y and ann_side:
-                    annotations.append({
-                        'id': int(ann_id),
-                        'x': float(ann_x),
-                        'y': float(ann_y),
-                        'side': ann_side
-                    })
-
-        return jsonify({"annotations": annotations})
+        root = ET.parse(path).getroot()
+        ns   = {'svg': 'http://www.w3.org/2000/svg'}
+        anns = []
+        grp  = root.find('.//svg:g[@id="annotations"]', ns)
+        if grp is not None:
+            for g in grp.findall('svg:g', ns):
+                aid = g.get('data-id')
+                ax  = g.get('data-x')
+                ay  = g.get('data-y')
+                sd  = g.get('data-side')
+                alx = g.get('data-lx')
+                aly = g.get('data-ly')
+                if aid and ax and ay and sd:
+                    ann = {'id': int(aid), 'x': float(ax), 'y': float(ay), 'side': sd}
+                    if alx and aly:
+                        ann['labelX'] = float(alx)
+                        ann['labelY'] = float(aly)
+                    asz = g.get('data-size')
+                    if asz:
+                        ann['annotationSize'] = float(asz)
+                    adesc = g.get('data-desc')
+                    if adesc:
+                        ann['description'] = adesc
+                    anns.append(ann)
+        vb = root.get('viewBox', '0 0 700 900').split()
+        try:
+            w, h = float(vb[2]), float(vb[3])
+        except Exception:
+            w, h = 700, 900
+        return jsonify({'annotations': anns, 'width': w, 'height': h})
     except Exception as e:
-        return jsonify({"error": str(e), "annotations": []}), 200
+        return jsonify({'error': str(e), 'annotations': []}), 200
 
 
-# -------------------- SAVE SVG ANNOTATIONS --------------------
 @app.route('/save_annotations', methods=['POST'])
-@app.route(f"{BASE_PATH}/save_annotations", methods=['POST'])
+@app.route(f'{BASE_PATH}/save_annotations', methods=['POST'])
 def save_annotations():
-    """
-    Receive annotations JSON, open the existing SVG, replace its <g id="annotations">
-    layer with fresh SVG annotation elements. The embedded <image> (base64) is untouched.
-    Only ONE file exists — no _original copy needed.
-    """
-    data = request.json
-    svg_filename = data['filename']  # e.g. "CPID-001.svg"
-    annotations = data['annotations']
-
-    svg_path = os.path.join(app.config['UPLOAD_FOLDER'], svg_filename)
-    if not os.path.exists(svg_path):
-        return jsonify({'success': False, 'error': 'SVG file not found'}), 404
-
-    import xml.etree.ElementTree as ET
-    ET.register_namespace('', 'http://www.w3.org/2000/svg')
+    data     = request.json
+    svg_file = data['filename']
+    path     = os.path.join(app.config['UPLOAD_FOLDER'], svg_file)
+    if not os.path.exists(path):
+        return jsonify({'success': False, 'error': 'SVG not found'}), 404
+    ET.register_namespace('',      'http://www.w3.org/2000/svg')
     ET.register_namespace('xlink', 'http://www.w3.org/1999/xlink')
-
     try:
-        tree = ET.parse(svg_path)
-        root = tree.getroot()
-        ns = {'svg': 'http://www.w3.org/2000/svg'}
-
-        # Remove old annotations group
-        ann_group = root.find('.//svg:g[@id="annotations"]', ns)
-        if ann_group is not None:
-            root.remove(ann_group)
-
-        # Build new annotations group
-        new_group = ET.SubElement(root, '{http://www.w3.org/2000/svg}g')
-        new_group.set('id', 'annotations')
-
-        for ann in annotations:
-            x = float(ann['x'])
-            y = float(ann['y'])
-            side = ann['side']
-            ann_id = int(ann['id'])
-            line_x = 50 if side == 'left' else 650
-
-            # Wrap each annotation in a <g> with data attributes for later parsing
-            g = ET.SubElement(new_group, '{http://www.w3.org/2000/svg}g')
-            g.set('data-id', str(ann_id))
-            g.set('data-x', str(x))
-            g.set('data-y', str(y))
-            g.set('data-side', side)
-
-            # Line from circle to target point
-            line = ET.SubElement(g, '{http://www.w3.org/2000/svg}line')
-            line.set('x1', str(line_x))
-            line.set('y1', str(y))
-            line.set('x2', str(x))
-            line.set('y2', str(y))
-            line.set('stroke', 'black')
-            line.set('stroke-width', '2')
-
-            # Small dot at target
-            dot = ET.SubElement(g, '{http://www.w3.org/2000/svg}circle')
-            dot.set('cx', str(x))
-            dot.set('cy', str(y))
-            dot.set('r', '3')
-            dot.set('fill', 'black')
-
-            # Big circle at line start
-            big = ET.SubElement(g, '{http://www.w3.org/2000/svg}circle')
-            big.set('cx', str(line_x))
-            big.set('cy', str(y))
-            big.set('r', '20')
-            big.set('fill', 'black')
-
-            # Number text
-            text = ET.SubElement(g, '{http://www.w3.org/2000/svg}text')
-            text.set('x', str(line_x))
-            text.set('y', str(y))
-            text.set('text-anchor', 'middle')
-            text.set('dominant-baseline', 'central')
-            text.set('fill', 'white')
-            text.set('font-size', '14')
-            text.set('font-weight', 'bold')
-            text.set('font-family', 'Arial, sans-serif')
-            text.text = str(ann_id)
-
-        # Write back — preserve XML declaration
-        tree.write(svg_path, encoding='unicode', xml_declaration=True)
-
-        return jsonify({'success': True, 'image_path': f"uploads/{svg_filename}"})
-
+        tree = ET.parse(path)
+        inject_annotations(tree.getroot(), data['annotations'])
+        # ✅ FIX: utf-8 au lieu de unicode — évite l'encoding error dans le navigateur
+        tree.write(path, encoding='utf-8', xml_declaration=True)
+        return jsonify({'success': True, 'image_path': f'uploads/{svg_file}'})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
-# -------------------- CREATE EXPLODED VIEW (SVG upload entry point) --------------------
 @app.route('/create_exploded_view', methods=['POST'])
-@app.route(f"{BASE_PATH}/create_exploded_view", methods=['POST'])
+@app.route(f'{BASE_PATH}/create_exploded_view', methods=['POST'])
 def create_exploded_view():
-    """
-    Receive an uploaded image, wrap it in an SVG named after the CPID,
-    and return the SVG filename so the editor can open it.
-    No _original copy is created — the SVG itself is the single source of truth.
-    """
-    file = request.files.get("vue_eclatee_image")
-    cpid_name = request.form.get("cpid", "").strip()
-    base = get_base_url()
-
-    if not file or file.filename == '':
-        return jsonify({"error": "No image file provided"}), 400
-
-    svg_path = save_vue_eclatee_as_svg(file, cpid=cpid_name if cpid_name else None)
-    if not svg_path:
-        return jsonify({"error": "Failed to create SVG"}), 500
-
-    svg_filename = svg_path.split('/')[-1]  # e.g. "CPID-001.svg"
-
-    return jsonify({
-        "success": "Image uploaded and converted to SVG! Opening editor...",
-        "redirect": f"{base}/editor/{svg_filename}",
-        "filename": svg_filename
-    })
+    file = request.files.get('plan')
+    name = (request.form.get('name') or request.form.get('cpid') or '').strip()
+    base = base_url()
+    if not file or not file.filename:
+        return jsonify({'error': 'No file provided'}), 400
+    try:
+        svg = make_svg(file, name=name or None)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+    if not svg:
+        return jsonify({'error': 'SVG creation failed'}), 500
+    fn = svg.split('/')[-1]
+    return jsonify({'success': True, 'redirect': f'{base}/editor/{fn}', 'filename': fn})
 
 
-# -------------------- CREATE EXPLODED VIEW WITH ANNOTATIONS (single-shot) --------------------
 @app.route('/create_exploded_view_with_annotations', methods=['POST'])
-@app.route(f"{BASE_PATH}/create_exploded_view_with_annotations", methods=['POST'])
+@app.route(f'{BASE_PATH}/create_exploded_view_with_annotations', methods=['POST'])
 def create_exploded_view_with_annotations():
-    """
-    Receive an uploaded image AND annotations JSON in one request.
-    Creates the SVG with the annotations already embedded.
-    Called by the JS flush when a brand-new image was edited before form submit.
-    This is the lazy path: the image was never sent to the server during editing —
-    only now at form-submit time is the file uploaded and SVG created.
-    """
-    import json as _json
-    import xml.etree.ElementTree as ET
-
-    file = request.files.get("vue_eclatee_image")
-    cpid_name = request.form.get("cpid", "").strip()
-    annotations_raw = request.form.get("annotations", "[]")
-
-    if not file or file.filename == '':
-        return jsonify({"error": "No image file provided"}), 400
-
+    file = request.files.get('plan')
+    name = (request.form.get('name') or request.form.get('cpid') or '').strip()
+    anns = []
     try:
-        annotations = _json.loads(annotations_raw)
+        anns = _json.loads(request.form.get('annotations', '[]'))
     except Exception:
-        annotations = []
-
-    # Step 1: create the base SVG (image embedded, empty annotations group)
-    svg_path = save_vue_eclatee_as_svg(file, cpid=cpid_name if cpid_name else None)
-    if not svg_path:
-        return jsonify({"error": "Failed to create SVG"}), 500
-
-    svg_filename = svg_path.split('/')[-1]
-    full_svg_path = os.path.join(app.config['UPLOAD_FOLDER'], svg_filename)
-
-    # Step 2: inject annotations into the SVG (same logic as save_annotations)
-    if annotations:
+        pass
+    if not file or not file.filename:
+        return jsonify({'error': 'No file provided'}), 400
+    try:
+        svg = make_svg(file, name=name or None)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+    if not svg:
+        return jsonify({'error': 'SVG creation failed'}), 500
+    fn   = svg.split('/')[-1]
+    path = os.path.join(app.config['UPLOAD_FOLDER'], fn)
+    if anns:
+        ET.register_namespace('',      'http://www.w3.org/2000/svg')
+        ET.register_namespace('xlink', 'http://www.w3.org/1999/xlink')
         try:
-            ET.register_namespace('', 'http://www.w3.org/2000/svg')
-            ET.register_namespace('xlink', 'http://www.w3.org/1999/xlink')
-            tree = ET.parse(full_svg_path)
-            root = tree.getroot()
-            ns = {'svg': 'http://www.w3.org/2000/svg'}
-
-            ann_group = root.find('.//svg:g[@id="annotations"]', ns)
-            if ann_group is not None:
-                root.remove(ann_group)
-
-            new_group = ET.SubElement(root, '{http://www.w3.org/2000/svg}g')
-            new_group.set('id', 'annotations')
-
-            for ann in annotations:
-                x      = float(ann['x'])
-                y      = float(ann['y'])
-                side   = ann['side']
-                ann_id = int(ann['id'])
-                line_x = 50 if side == 'left' else 650
-
-                g = ET.SubElement(new_group, '{http://www.w3.org/2000/svg}g')
-                g.set('data-id', str(ann_id))
-                g.set('data-x', str(x))
-                g.set('data-y', str(y))
-                g.set('data-side', side)
-
-                line = ET.SubElement(g, '{http://www.w3.org/2000/svg}line')
-                line.set('x1', str(line_x)); line.set('y1', str(y))
-                line.set('x2', str(x));      line.set('y2', str(y))
-                line.set('stroke', 'black'); line.set('stroke-width', '2')
-
-                dot = ET.SubElement(g, '{http://www.w3.org/2000/svg}circle')
-                dot.set('cx', str(x)); dot.set('cy', str(y))
-                dot.set('r', '3'); dot.set('fill', 'black')
-
-                big = ET.SubElement(g, '{http://www.w3.org/2000/svg}circle')
-                big.set('cx', str(line_x)); big.set('cy', str(y))
-                big.set('r', '20'); big.set('fill', 'black')
-
-                text = ET.SubElement(g, '{http://www.w3.org/2000/svg}text')
-                text.set('x', str(line_x)); text.set('y', str(y))
-                text.set('text-anchor', 'middle')
-                text.set('dominant-baseline', 'central')
-                text.set('fill', 'white'); text.set('font-size', '14')
-                text.set('font-weight', 'bold')
-                text.set('font-family', 'Arial, sans-serif')
-                text.text = str(ann_id)
-
-            tree.write(full_svg_path, encoding='unicode', xml_declaration=True)
+            tree = ET.parse(path)
+            inject_annotations(tree.getroot(), anns)
+            # ✅ FIX: utf-8 au lieu de unicode — évite l'encoding error dans le navigateur
+            tree.write(path, encoding='utf-8', xml_declaration=True)
         except Exception as e:
-            return jsonify({"error": f"Failed to write annotations: {e}"}), 500
-
-    return jsonify({
-        "success": True,
-        "filename": svg_filename,
-        "image_path": f"uploads/{svg_filename}"
-    })
+            return jsonify({'error': str(e)}), 500
+    return jsonify({'success': True, 'filename': fn, 'image_path': f'uploads/{fn}'})
 
 
-# -------------------- UPDATE --------------------
-@app.route("/update_fiche", methods=["POST"])
-@app.route(f"{BASE_PATH}/update_fiche", methods=["POST"])
-def update_fiche():
-    cpid = request.form.get("updateRef")
-    ref_type = request.form.get("type", "Cloison")
-    base = get_base_url()
-
-    if not cpid:
-        flash("Sélectionnez une référence à mettre à jour", "warning")
-        return redirect(f"{base}/?type={ref_type}")
-
-    conn = get_db_connection()
-    conn.row_factory = sqlite3.Row
-
-    existing_fr = conn.execute(
-        "SELECT * FROM fiche_technique WHERE cpid=? AND langue='fr'", (cpid,)
-    ).fetchone()
-    existing_en = conn.execute(
-        "SELECT * FROM fiche_technique WHERE cpid=? AND langue='en'", (cpid,)
-    ).fetchone()
-    existing_nl = conn.execute(
-        "SELECT * FROM fiche_technique WHERE cpid=? AND langue='nl'", (cpid,)
-    ).fetchone()
-
-    if not existing_fr:
-        flash("Référence introuvable", "danger")
-        conn.close()
-        return redirect(f"{base}/?type={ref_type}")
-
-    data_fr = {}
-    for k, v in request.form.items():
-        if k not in ["updateRef", "deleteRef", "previous_ref", "vue_eclatee_already_saved"] and not k.startswith(
-                "delete_") and not k.endswith("_nl") and not k.endswith("_en"):
-            data_fr[k] = v
-
-    data_fr["type"] = ref_type
-
-    en_translations = extract_translations(request.form, "en")
-    nl_translations = extract_translations(request.form, "nl")
-
-    files = [
-        "variant_image", "photo_produit",
-        "dessin_technique_1", "dessin_technique_2", "dessin_technique_3",
-        "dessin_technique_4", "dessin_technique_5", "dessin_technique_6"
-    ]
-
-    # ── FIX: pass cpid=cpid so filenames are CPID_fieldname_timestamp.ext ──
-    for f in files:
-        delete_flag = request.form.get(f"delete_{f}")
-        if delete_flag == "true":
-            data_fr[f] = None
-        else:
-            uploaded = save_file(request.files.get(f), cpid=cpid, field_name=f)
-            data_fr[f] = uploaded if uploaded else existing_fr[f]
-
-    # ── Vue éclatée (SVG-based) ──
-    # SECURITY FIX: validate vue_eclatee_already_saved belongs to THIS CPID
-    # to prevent stale editor sessions from overwriting the wrong record's image.
-    delete_vue = request.form.get("delete_vue_eclatee_image")
-    vue_already_saved = request.form.get("vue_eclatee_already_saved", "").strip()
-    vue_file = request.files.get("vue_eclatee_image")
-
-    if delete_vue == "true":
-        data_fr["vue_eclatee_image"] = None
-    elif vue_already_saved and is_valid_svg_for_cpid(vue_already_saved, cpid):
-        # SVG already annotated by editor AND belongs to this CPID — safe to use
-        data_fr["vue_eclatee_image"] = f"uploads/{vue_already_saved}"
-    elif vue_file and vue_file.filename.strip():
-        # New image uploaded without editor — wrap in SVG named after CPID
-        data_fr["vue_eclatee_image"] = save_vue_eclatee_as_svg(vue_file, cpid=cpid)
-    else:
-        # No new upload, no valid saved SVG (or stale SVG from different CPID)
-        # Keep the existing image stored in the database
-        old = existing_fr["vue_eclatee_image"]
-        data_fr["vue_eclatee_image"] = old if old else None
-
-    data_fr["vue_eclatee_count"] = calculate_vue_eclatee_count(data_fr)
-
-    try:
-        set_clause_fr = ", ".join([f"{k}=?" for k in data_fr.keys()])
-        conn.execute(f"UPDATE fiche_technique SET {set_clause_fr} WHERE cpid=? AND langue=?",
-                     list(data_fr.values()) + [cpid, "fr"])
-
-        data_en = data_fr.copy()
-        for field in TRANSLATABLE_FIELDS:
-            if field in data_en:
-                data_en[field] = None
-        for key, value in en_translations.items():
-            if key in data_en and value and value.strip():
-                data_en[key] = value
-
-        if not existing_en:
-            data_en["cpid"] = cpid
-            data_en["langue"] = "en"
-            cols_en = ", ".join(data_en.keys())
-            placeholders_en = ", ".join(["?"] * len(data_en))
-            conn.execute(f"INSERT INTO fiche_technique ({cols_en}) VALUES ({placeholders_en})", list(data_en.values()))
-        else:
-            set_clause_en = ", ".join([f"{k}=?" for k in data_en.keys()])
-            conn.execute(f"UPDATE fiche_technique SET {set_clause_en} WHERE cpid=? AND langue=?",
-                         list(data_en.values()) + [cpid, "en"])
-
-        data_nl = data_fr.copy()
-        for field in TRANSLATABLE_FIELDS:
-            if field in data_nl:
-                data_nl[field] = None
-        for key, value in nl_translations.items():
-            if key in data_nl and value and value.strip():
-                data_nl[key] = value
-
-        if not existing_nl:
-            data_nl["cpid"] = cpid
-            data_nl["langue"] = "nl"
-            cols_nl = ", ".join(data_nl.keys())
-            placeholders_nl = ", ".join(["?"] * len(data_nl))
-            conn.execute(f"INSERT INTO fiche_technique ({cols_nl}) VALUES ({placeholders_nl})", list(data_nl.values()))
-        else:
-            set_clause_nl = ", ".join([f"{k}=?" for k in data_nl.keys()])
-            conn.execute(f"UPDATE fiche_technique SET {set_clause_nl} WHERE cpid=? AND langue=?",
-                         list(data_nl.values()) + [cpid, "nl"])
-
-        conn.commit()
-        flash(f"CPID '{cpid}' mise à jour avec succès en FR, EN et NL !", "success")
-    except Exception as e:
-        conn.rollback()
-        flash(f"Erreur lors de la mise à jour : {e}", "danger")
-    finally:
-        conn.close()
-
-    return redirect(f"{base}/?type={ref_type}&cpid={cpid}")
+@app.route('/index')
+@app.route(f'{BASE_PATH}/index')
+def index():
+    name = (request.args.get('name') or request.args.get('cpid') or '').strip()
+    base = base_url()
+    if not name:
+        return 'Name introuvable', 404
+    conn = get_db()
+    row  = conn.execute(f"SELECT * FROM {TABLE} WHERE name=?", (name,)).fetchone()
+    conn.close()
+    if not row:
+        return 'Référence introuvable', 404
+    fiche = dict(row)
+    # ✅ SVG inline pour impression A0 nette (vectoriel de bout en bout)
+    svg_inline = _svg_inline_for_plan(fiche.get('plan'))
+    return render_template('plan.html', fiche=fiche, base=base,
+                           svg_inline=svg_inline)
 
 
-# -------------------- DELETE --------------------
-@app.route("/delete_fiche", methods=["POST"])
-@app.route(f"{BASE_PATH}/delete_fiche", methods=["POST"])
-def delete_fiche():
-    cpid = request.form.get("deleteRef")
-    ref_type = request.form.get("type", "Cloison")
-    base = get_base_url()
-
-    if not cpid:
-        flash("Sélectionnez une référence à supprimer", "warning")
-        return redirect(f"{base}/?type={ref_type}")
-
-    try:
-        conn = get_db_connection()
-        conn.execute("DELETE FROM fiche_technique WHERE cpid=?", (cpid,))
-        conn.commit()
-        conn.close()
-        flash(f"CPID '{cpid}' supprimée avec succès (versions FR, EN et NL) !", "success")
-    except Exception as e:
-        flash(f"Erreur lors de la suppression: {e}", "danger")
-
-    return redirect(f"{base}/?type={ref_type}")
+@app.template_filter('date')
+def date_filter(value, format='%Y-%m-%d'):
+    if value == "now":
+        return datetime.now().strftime(format)
+    return value
 
 
 @app.template_filter('remove_last_part')
-def remove_last_part(value):
-    if not value:
-        return ""
-    return "_".join(value.split("_")[:-1])
+def remove_last_part(v):
+    return '_'.join(v.split('_')[:-1]) if v else ''
 
 
-# -------------------- INDEX (public fiche view) --------------------
-@app.route('/index')
-@app.route(f"{BASE_PATH}/index")
-def index():
-    cpid = request.args.get("cpid")
-    lang = request.args.get("lang", "fr")
-    base = get_base_url()
-
-    fiche = None
-    if cpid:
-        conn = get_db_connection()
-        row = conn.execute(
-            "SELECT * FROM fiche_technique WHERE cpid=? AND langue=?", (cpid, lang)
-        ).fetchone()
-        conn.close()
-        if row:
-            fiche = dict(row)
-
-    if not fiche:
-        return "Référence introuvable", 404
-
-    product_type = fiche.get('type') or fiche.get('Type')
-
-    if lang == "en":
-        return render_template("indexHaasEN.html", fiche=fiche, lang="en", base=base, type=product_type, cpid=cpid)
-    elif lang == "nl":
-        return render_template("indexHaasNL.html", fiche=fiche, lang="nl", base=base, type=product_type, cpid=cpid)
-    else:
-        return render_template("indexHaas.html", fiche=fiche, lang="fr", base=base, type=product_type, cpid=cpid)
-
-
-# -------------------- RUN --------------------
-if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000, debug=True)
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=5000, debug=True)

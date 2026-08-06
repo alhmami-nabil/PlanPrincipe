@@ -3,21 +3,37 @@
 // ============================================
 let editorCanvas, editorCtx;
 let editorImage = null;
-let editorAnnotations = [];        // annotations in memory
-let editorFilename = '';           // SVG filename on server (only set for existing SVGs)
+let editorAnnotations = [];
+let editorFilename = '';
 let nextAnnotationId = 1;
-let isDragging = false;
-let draggedAnnotation = null;
-
-// true = user has edited annotations, SVG must be written before form submit
 let editorDirty = false;
-
-// For NEW image uploads: hold the raw File object in memory.
-// Nothing is sent to the server until the form is submitted.
-let pendingImageFile = null;       // File object waiting to be uploaded
-let pendingImageDataUrl = null;    // dataURL for the canvas preview
-
+let pendingImageFile = null;
+let pendingImageDataUrl = null;
 let currentVueEclateeImage = null;
+let editorImgW = 1500;
+let editorImgH = 1300;
+
+// Annotation size
+let annotationSize = 1.0;
+const SIZE_MIN = 0.2;
+const SIZE_MAX = 3.0;
+
+// ✅ Zoom / Pan de l'éditeur
+let editorZoom = 1;
+let editorPanX = 0;
+let editorPanY = 0;
+const EZOOM_MIN = 1;
+const EZOOM_MAX = 12;
+let isPanningEditor = false;
+let panStartCx = 0, panStartCy = 0, panOrigX = 0, panOrigY = 0, panMoved = false;
+
+// Two-click placement state
+let placementMode = 'idle';
+let pendingDot = null;
+
+// Drag state
+let isDragging = false;
+let dragTarget = null;
 
 const getBasePath = () => {
     return (typeof window !== 'undefined' && window.location.pathname.startsWith('/tools/fiches'))
@@ -25,40 +41,117 @@ const getBasePath = () => {
 };
 
 // ============================================
+// ANNOTATION INPUT MODAL
+// ============================================
+function _showAnnotationModal(defaultId, callback) {
+    const existing = document.getElementById('annotationInputModal');
+    if (existing) existing.remove();
+
+    const overlay = document.createElement('div');
+    overlay.id = 'annotationInputModal';
+    overlay.style.cssText = 'position:fixed;inset:0;z-index:99999;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,0.55)';
+
+    overlay.innerHTML = `
+      <div style="background:#fff;border-radius:10px;padding:28px 32px;min-width:340px;
+                  box-shadow:0 8px 32px rgba(0,0,0,0.35);font-family:Arial,sans-serif;">
+        <h6 style="margin:0 0 18px;font-size:15px;font-weight:700;color:#1a1a2e;">
+          🔢 Numéro &amp; Description
+        </h6>
+        <div style="margin-bottom:14px;">
+          <label style="font-size:12px;font-weight:600;color:#555;display:block;margin-bottom:4px;">
+            Numéro d'annotation
+          </label>
+          <input id="_ann_num" type="number" min="1" value="${defaultId}"
+                 style="width:100%;padding:8px 10px;border:1.5px solid #ccc;border-radius:6px;
+                        font-size:15px;font-weight:700;color:#1565C0;outline:none;"
+                 onkeydown="if(event.key==='Enter')document.getElementById('_ann_desc').focus()">
+        </div>
+        <div style="margin-bottom:22px;">
+          <label style="font-size:12px;font-weight:600;color:#555;display:block;margin-bottom:4px;">
+            Description
+          </label>
+          <input id="_ann_desc" type="text"
+                 placeholder="ex: Profil aluminium, Joint EPDM…"
+                 style="width:100%;padding:8px 10px;border:1.5px solid #ccc;border-radius:6px;
+                        font-size:14px;outline:none;"
+                 onkeydown="if(event.key==='Enter')document.getElementById('_ann_ok').click()">
+        </div>
+        <div style="display:flex;gap:10px;justify-content:flex-end;">
+          <button id="_ann_cancel"
+                  style="padding:8px 20px;border:1.5px solid #ccc;border-radius:6px;
+                         background:#f5f5f5;font-size:14px;cursor:pointer;">Annuler</button>
+          <button id="_ann_ok"
+                  style="padding:8px 22px;border:none;border-radius:6px;
+                         background:#1565C0;color:#fff;font-size:14px;font-weight:700;cursor:pointer;">OK</button>
+        </div>
+      </div>`;
+
+    document.body.appendChild(overlay);
+
+    const numInput  = document.getElementById('_ann_num');
+    const descInput = document.getElementById('_ann_desc');
+    const okBtn     = document.getElementById('_ann_ok');
+    const cancelBtn = document.getElementById('_ann_cancel');
+
+    // ✅ Pré-remplir la description depuis le formulaire par NUMÉRO d'annotation
+    // (le champ description_N du formulaire est indexé par slot, pas par numéro)
+    const byNum = _formDescriptionsByNumber();
+    if (byNum[defaultId]) descInput.value = byNum[defaultId];
+
+    // ✅ Si le numéro change dans le modal, recharger la description correspondante
+    numInput.addEventListener('input', function () {
+        const n = parseInt(numInput.value);
+        if (!isNaN(n) && byNum[n] !== undefined) descInput.value = byNum[n];
+    });
+
+    setTimeout(() => numInput.focus(), 50);
+
+    function _confirm() {
+        const id   = parseInt(numInput.value);
+        const desc = descInput.value.trim();
+        overlay.remove();
+        if (isNaN(id) || id < 1) { callback(null, null); return; }
+        callback(id, desc);
+    }
+    function _cancel() { overlay.remove(); callback(null, null); }
+
+    okBtn.addEventListener('click', _confirm);
+    cancelBtn.addEventListener('click', _cancel);
+    overlay.addEventListener('click', e => { if (e.target === overlay) _cancel(); });
+    document.addEventListener('keydown', function esc(e) {
+        if (e.key === 'Escape') { document.removeEventListener('keydown', esc); _cancel(); }
+    });
+}
+
+// ============================================
 // DOMContentLoaded
 // ============================================
 window.addEventListener('DOMContentLoaded', function () {
     const base = getBasePath();
 
-    // ── Éditer button ──
     const btnEdit = document.getElementById('btnEditImage');
     if (btnEdit) {
         btnEdit.addEventListener('click', function (e) {
             e.preventDefault();
-            const fileInput = document.getElementById('imageUpload');
-
-            if (fileInput && fileInput.files && fileInput.files[0]) {
-                // New file selected: open editor locally — NO server call yet
-                _openNewImageInEditor(fileInput.files[0]);
+            // ✅ PDF déjà converti en PNG (affichage) → data URL en mémoire
+            if (pendingImageDataUrl && pendingImageDataUrl.startsWith('data:')) {
+                _openNewImageInEditor(pendingImageDataUrl);
                 return;
             }
             if (currentVueEclateeImage) {
-                // Existing SVG on server: load image + annotations into editor
                 _openEditorFromSVG(currentVueEclateeImage, base);
                 return;
             }
-            alert("Veuillez d'abord sélectionner ou charger une image 700×900 px");
+            alert("Veuillez d'abord sélectionner un PDF.");
         });
     }
 
-    // ── Intercept form submit — flush SVG to server first if needed ──
+    // Intercept form submit to flush annotations
     document.addEventListener('click', function (e) {
         const btn = e.target.closest('button[type="submit"], input[type="submit"]');
         if (!btn) return;
         const form = btn.form || document.getElementById('mainForm');
         if (!form) return;
-
-        // Only intercept when there is something to save
         if (!editorDirty) return;
         if (!editorFilename && !pendingImageFile) return;
 
@@ -66,24 +159,14 @@ window.addEventListener('DOMContentLoaded', function () {
         e.stopImmediatePropagation();
 
         const formAction = btn.getAttribute('formaction') || form.action || '';
-
-        // ── FIX: Detect add vs update more robustly ──
-        // Check formaction attribute, form action URL, form id, and button name/id
-        const isAdd = (
-            formAction.includes('add_fiche') ||
-            (form.id && form.id.toLowerCase().includes('add')) ||
-            (btn.name && btn.name.toLowerCase().includes('add')) ||
-            (btn.id && btn.id.toLowerCase().includes('add'))
-        );
-        const submitAction = isAdd ? 'add' : 'update';
-
-        _flushAnnotationsToServer(base, submitAction, function () {
+        const isAdd      = formAction.includes('add_fiche');
+        _flushAnnotationsToServer(base, isAdd ? 'add' : 'update', function () {
             if (formAction) form.action = formAction;
             form.submit();
         });
     }, true);
 
-    // ── CPID dropdown change ──
+    // Dropdown change → load fiche
     const updateRefSelect = document.getElementById("updateRef");
     if (updateRefSelect) {
         updateRefSelect.addEventListener("change", function () {
@@ -94,48 +177,61 @@ window.addEventListener('DOMContentLoaded', function () {
             const loadingOverlay = document.getElementById('loadingOverlay');
             if (loadingOverlay) loadingOverlay.classList.add('active');
             document.querySelectorAll('input[name^="delete_"]').forEach(i => i.value = "false");
-            document.querySelectorAll('.preview').forEach(p => {
-                p.classList.remove('deleted'); p.style.border = ''; p.style.opacity = '1';
-            });
             _resetEditorState();
 
-            fetch(`${base}/get_fiche/${ref}`)
+            fetch(`${base}/get_fiche/${encodeURIComponent(ref)}`)
                 .then(r => r.json())
                 .then(data => {
                     if (loadingOverlay) loadingOverlay.classList.remove('active');
                     if (data.error) { alert('Erreur: ' + data.error); return; }
-                    const fr = data.fr || {}, en = data.en || {}, nl = data.nl || {};
+                    const fr = data.fr || data || {};
+
                     for (const [k, v] of Object.entries(fr)) {
-                        if (k === 'id' || k === 'langue' || k === 'type') continue;
+                        if (['id','langue','type'].includes(k)) continue;
+                        if (k.startsWith('number_') || k.startsWith('description_')) continue;
                         const input = document.querySelector(`[name="${k}"]`);
                         if (input && input.type !== "file") input.value = v || "";
                     }
-                    for (const [k, v] of Object.entries(en)) {
-                        if (k === 'id' || k === 'langue' || k === 'type') continue;
-                        const el = document.getElementById(k + "_en");
-                        if (el) el.value = v || "";
+
+                    const sizeDisplay = document.getElementById('imageSizeDisplay');
+                    if (sizeDisplay) sizeDisplay.style.display = 'none';
+
+                    for (let i = 1; i <= 200; i++) {
+                        const n = document.getElementById('number_' + i);
+                        const d = document.getElementById('description_' + i);
+                        if (n) n.value = '';
+                        if (d) d.value = '';
+                        const badge = document.getElementById('badge_' + i);
+                        if (badge) badge.textContent = i;
                     }
-                    for (const [k, v] of Object.entries(nl)) {
-                        if (k === 'id' || k === 'langue' || k === 'type') continue;
-                        const el = document.getElementById(k + "_nl");
-                        if (el) el.value = v || "";
-                    }
-                    _setImagePreview('photoPreview', fr.photo_produit);
-                    _setImagePreview('explodedPreview', fr.vue_eclatee_image);
-                    _setImagePreview('dessinPreviewVariant', fr.variant_image);
-                    currentVueEclateeImage = fr.vue_eclatee_image || null;
+
+                    const dbNums = Object.keys(fr)
+                        .filter(k => k.startsWith('number_') && fr[k] && fr[k].toString().trim())
+                        .map(k => parseInt(k.split('_')[1]))
+                        .filter(n => !isNaN(n))
+                        .sort((a, b) => a - b);
+
+                    dbNums.forEach((num, idx) => {
+                        const slot  = idx + 1;
+                        const nEl   = document.getElementById('number_' + slot);
+                        const dEl   = document.getElementById('description_' + slot);
+                        const badge = document.getElementById('badge_' + slot);
+                        if (nEl) nEl.value = String(num);
+                        if (dEl) dEl.value = (fr[`description_${num}`] || '').toString().trim();
+                        if (badge) badge.textContent = String(num);
+                    });
+
+                    _setImagePreview('explodedPreview', fr.plan);
+                    currentVueEclateeImage = fr.plan || null;
                     if (currentVueEclateeImage) {
-                        const parts = currentVueEclateeImage.split('/');
-                        editorFilename = parts[parts.length - 1];
+                        editorFilename = currentVueEclateeImage.split('/').pop();
                     }
                     const btn = document.getElementById('btnEditImage');
                     if (btn) {
                         btn.disabled = !currentVueEclateeImage;
                         btn.title = currentVueEclateeImage ? 'Éditer les annotations' : 'Aucune image à éditer';
                     }
-                    for (let i = 1; i <= 6; i++) {
-                        _setImagePreview('dessinPreview' + i, fr['dessin_technique_' + i]);
-                    }
+                    if (typeof refreshComposantRows === 'function') refreshComposantRows();
                 })
                 .catch(err => {
                     if (loadingOverlay) loadingOverlay.classList.remove('active');
@@ -144,48 +240,41 @@ window.addEventListener('DOMContentLoaded', function () {
         });
     }
 
-    const urlParams = new URLSearchParams(window.location.search);
-    const cpidFromUrl = urlParams.get('cpid');
-    if (cpidFromUrl && updateRefSelect) {
-        updateRefSelect.value = cpidFromUrl;
+    // Auto-load from URL ?name=
+    const urlParams   = new URLSearchParams(window.location.search);
+    const nameFromUrl = urlParams.get('name');
+    if (nameFromUrl && updateRefSelect) {
+        updateRefSelect.value = nameFromUrl;
         const selectedValueEl = document.getElementById('selectedValue');
-        if (selectedValueEl) selectedValueEl.textContent = cpidFromUrl;
+        if (selectedValueEl) selectedValueEl.textContent = nameFromUrl;
         document.querySelectorAll('.dropdown-item-custom').forEach(item => {
-            item.classList.toggle('selected', item.dataset.value === cpidFromUrl);
+            item.classList.toggle('selected', item.dataset.value === nameFromUrl);
         });
         updateRefSelect.dispatchEvent(new Event('change'));
     }
-
-    const typeCloison = document.getElementById('typeCloison');
-    const typePorte   = document.getElementById('typePorte');
-    if (typeCloison) typeCloison.addEventListener('change', function () {
-        if (this.checked) window.location.href = `${base}/?type=Cloison`;
-    });
-    if (typePorte) typePorte.addEventListener('change', function () {
-        if (this.checked) window.location.href = `${base}/?type=Porte`;
-    });
 });
 
 // ============================================
-// Reset all editor state
+// HELPERS
 // ============================================
 function _resetEditorState() {
-    editorAnnotations    = [];
-    editorFilename       = '';
-    editorDirty          = false;
-    nextAnnotationId     = 1;
-    pendingImageFile     = null;
-    pendingImageDataUrl  = null;
+    editorAnnotations      = [];
+    editorFilename         = '';
+    editorDirty            = false;
+    nextAnnotationId       = 1;
+    pendingImageFile       = null;
+    pendingImageDataUrl    = null;
     currentVueEclateeImage = null;
-    const alreadySavedInput = document.getElementById('vue_eclatee_already_saved');
-    if (alreadySavedInput) alreadySavedInput.value = '';
+    editorImgW = 1500; editorImgH = 1300;
+    placementMode = 'idle';
+    pendingDot    = null;
+    editorZoom = 1; editorPanX = 0; editorPanY = 0;
+    const inp = document.getElementById('plan_already_saved');
+    if (inp) inp.value = '';
     const btn = document.getElementById('btnEditImage');
     if (btn) { btn.disabled = true; btn.title = 'Aucune image à éditer'; }
 }
 
-// ============================================
-// Image preview helper
-// ============================================
 function _setImagePreview(previewId, imagePath) {
     const img = document.getElementById(previewId);
     if (!img) return;
@@ -193,399 +282,266 @@ function _setImagePreview(previewId, imagePath) {
         img.src = '/static/' + imagePath + '?t=' + Date.now();
         img.classList.remove('d-none', 'deleted');
         img.style.border = ''; img.style.opacity = '1';
+        // ✅ Clic sur la preview → visionneuse plein écran dans la page
+        img.style.cursor = 'zoom-in';
+        img.title = '🔍 Cliquer pour agrandir (molette = zoom, Retour pour revenir)';
+        img.onclick = function () {
+            _openSvgViewer('/static/' + imagePath);
+        };
     } else {
         img.src = ''; img.classList.add('d-none');
-        img.classList.remove('deleted');
-        img.style.border = ''; img.style.opacity = '1';
+        img.style.cursor = '';
+        img.title = '';
+        img.onclick = null;
     }
 }
 
-// ============================================
-// Get current CPID — FIXED
-//
-// action: 'add'    → read from #cpid text input (new record)
-//         'update' → read from #updateRef dropdown (existing record)
-//         null     → auto-detect: try #cpid first, then #updateRef
-// ============================================
 function _getCurrentCpid(action) {
-    const cpidInput = document.getElementById('cpid');
+    const nameInput = document.getElementById('name');
     const updateRef = document.getElementById('updateRef');
+    if (action === 'add')    return (nameInput && nameInput.value.trim()) || (updateRef && updateRef.value.trim()) || '';
+    if (action === 'update') return (updateRef && updateRef.value.trim()) || (nameInput && nameInput.value.trim()) || '';
+    return (nameInput && nameInput.value.trim()) || (updateRef && updateRef.value.trim()) || '';
+}
 
-    if (action === 'add') {
-        // Adding a new record — the target CPID is always in the text input
-        const val = cpidInput && cpidInput.value.trim();
-        if (val) return val;
-        // Fallback: maybe the page uses updateRef for adds too
-        return updateRef && updateRef.value.trim() ? updateRef.value.trim() : '';
+// ✅ Lit les descriptions actuellement saisies dans le formulaire COMPOSANTS,
+// indexées par NUMÉRO d'annotation (valeur du champ number_N, pas le slot).
+function _formDescriptionsByNumber() {
+    const map = {};
+    for (let i = 1; i <= 200; i++) {
+        const n = document.getElementById('number_' + i);
+        const d = document.getElementById('description_' + i);
+        if (!n || !d) continue;
+        const num  = parseInt((n.value || '').trim());
+        const desc = (d.value || '').trim();
+        if (!isNaN(num) && num >= 1 && desc) map[num] = desc;
     }
+    return map;
+}
 
-    if (action === 'update') {
-        // Updating an existing record — CPID comes from the dropdown
-        const val = updateRef && updateRef.value.trim();
-        if (val) return val;
-        // Fallback: maybe a text input holds the CPID
-        return cpidInput && cpidInput.value.trim() ? cpidInput.value.trim() : '';
-    }
-
-    // Auto-detect: prefer non-empty text input, then dropdown
-    if (cpidInput && cpidInput.value.trim()) return cpidInput.value.trim();
-    if (updateRef && updateRef.value.trim()) return updateRef.value.trim();
-    return '';
+// ✅ Fusionne les descriptions du FORMULAIRE (= base de données, source la
+// plus récente) dans une liste d'annotations chargée depuis le SVG.
+// Corrige le cas : description modifiée dans COMPOSANTS + Mettre à jour,
+// puis ouverture de l'éditeur → l'éditeur reprenait l'ANCIENNE description
+// stockée dans le SVG et l'imposait partout au moment d'Enregistrer.
+function _mergeFormDescriptions(anns) {
+    const byNum = _formDescriptionsByNumber();
+    anns.forEach(a => {
+        if (byNum[a.id] !== undefined) a.description = byNum[a.id];
+    });
+    return anns;
 }
 
 // ============================================
-// Open a NEW local image file directly in the editor.
-// Reads the file as a dataURL — zero server calls.
-// The file is stored in pendingImageFile for later upload.
+// PDF UPLOAD — PNG serveur pour l'AFFICHAGE, PDF original conservé
+// pour la conversion VECTORIELLE côté serveur (netteté A0).
+// ✅ Les annotations de la fiche existante sont CONSERVÉES.
 // ============================================
-function _openNewImageInEditor(file) {
-    const reader = new FileReader();
-    reader.onload = function (e) {
-        pendingImageFile    = file;
-        pendingImageDataUrl = e.target.result;
-        editorAnnotations   = [];
-        editorDirty         = false;
-        nextAnnotationId    = 1;
-        // Open editor with the local dataURL — no SVG on server yet
-        openEditorModal(pendingImageDataUrl, [], null);
-    };
-    reader.onerror = function () {
-        alert("Impossible de lire le fichier image.");
-    };
-    reader.readAsDataURL(file);
-}
+function handleImageUpload(input) {
+    const file    = input.files[0];
+    const preview = document.getElementById('explodedPreview');
+    const btn     = document.getElementById('btnEditImage');
+    if (!file) return;
 
-// ============================================
-// Open existing SVG from server in the editor.
-// Loads image + existing annotations into memory — no server write.
-// ============================================
-function _openEditorFromSVG(svgPath, base) {
+    const isPdf = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf');
+    if (!isPdf) {
+        input.value = '';
+        if (preview) { preview.src = ''; preview.classList.add('d-none'); }
+        if (btn) btn.disabled = true;
+        const sizeDisplay = document.getElementById('imageSizeDisplay');
+        if (sizeDisplay) {
+            sizeDisplay.textContent = `❌ ${file.name} — seuls les fichiers PDF sont acceptés`;
+            sizeDisplay.style.display      = 'inline-flex';
+            sizeDisplay.style.background   = '#fef2f2';
+            sizeDisplay.style.borderColor  = '#fecaca';
+            sizeDisplay.style.color        = '#dc2626';
+        }
+        alert(`❌ Fichier refusé : ${file.name}\nSeuls les fichiers PDF sont acceptés.`);
+        return;
+    }
+
+    // ✅ Capturer le SVG existant AVANT réinitialisation (annotations conservées)
+    const prevSvg = currentVueEclateeImage;
+
     const loadingOverlay = document.getElementById('loadingOverlay');
     if (loadingOverlay) loadingOverlay.classList.add('active');
-    const parts = svgPath.split('/');
-    editorFilename = parts[parts.length - 1]; // e.g. "A123456.svg"
 
-    // Always clear pendingImageFile — we will re-evaluate at flush time
-    pendingImageFile    = null;
-    pendingImageDataUrl = null;
+    const fd = new FormData();
+    fd.append('pdf', file);
 
-    // Step 1: load existing annotations
-    fetch(`${base}/get_svg_annotations/${svgPath}`)
+    fetch(`${getBasePath()}/convert_pdf`, { method: 'POST', body: fd })
         .then(r => r.json())
-        .then(annData => {
-            const existingAnnotations = annData.annotations || [];
-            editorAnnotations = existingAnnotations.slice();
-            nextAnnotationId  = editorAnnotations.length
-                ? Math.max(...editorAnnotations.map(a => a.id)) + 1 : 1;
-            editorDirty = false;
+        .then(data => {
+            if (loadingOverlay) loadingOverlay.classList.remove('active');
+            if (!data.success || !data.dataUrl) {
+                input.value = '';
+                if (preview) { preview.src = ''; preview.classList.add('d-none'); }
+                if (btn) btn.disabled = true;
+                alert('❌ Erreur conversion PDF : ' + (data.error || 'inconnue'));
+                return;
+            }
 
-            // Step 2: fetch SVG content to extract the embedded source image
-            return fetch(`/static/uploads/${editorFilename}?t=${Date.now()}`)
-                .then(r => r.text())
-                .then(svgText => {
-                    if (loadingOverlay) loadingOverlay.classList.remove('active');
+            // ── PNG = affichage éditeur/preview uniquement ──
+            pendingImageDataUrl = data.dataUrl;
 
-                    const parser = new DOMParser();
-                    const svgDoc = parser.parseFromString(svgText, 'image/svg+xml');
-                    const imgEl  = svgDoc.getElementById('source-image');
-                    let imgHref  = null;
-                    if (imgEl) {
-                        imgHref = imgEl.getAttribute('href') ||
-                                  imgEl.getAttributeNS('http://www.w3.org/1999/xlink', 'href');
-                    }
+            // ✅ Le PDF ORIGINAL est conservé pour la conversion vectorielle serveur
+            pendingImageFile = file;
 
-                    // Store the raw image dataURL so _flushAnnotationsToServer can
-                    // build a new SVG for a different CPID if needed at submit time.
-                    if (imgHref && imgHref.startsWith('data:')) {
-                        pendingImageDataUrl = imgHref;
-                    }
+            if (preview) {
+                preview.src = data.dataUrl;
+                preview.classList.remove('d-none', 'deleted');
+                preview.style.border = ''; preview.style.opacity = '1';
+            }
+            if (btn) { btn.disabled = false; btn.title = 'Éditer ce plan'; }
 
-                    // Open the editor — image is the extracted dataURL or the raw SVG
-                    const imageSrc = imgHref || (() => {
-                        const blob = new Blob([svgText], { type: 'image/svg+xml' });
-                        return URL.createObjectURL(blob);
-                    })();
-                    openEditorModal(imageSrc, existingAnnotations, null);
-                });
+            const sizeDisplay = document.getElementById('imageSizeDisplay');
+            if (sizeDisplay) {
+                sizeDisplay.textContent = `✓ PDF converti — ${data.width}×${data.height}px`;
+                sizeDisplay.style.display      = 'inline-flex';
+                sizeDisplay.style.background   = '#f0fdf4';
+                sizeDisplay.style.borderColor  = '#bbf7d0';
+                sizeDisplay.style.color        = '#059669';
+            }
+
+            const del = document.getElementById('delete_plan');
+            if (del) del.value = "false";
+            editorAnnotations      = [];
+            editorDirty            = false;
+            currentVueEclateeImage = null;
+            editorFilename         = '';
+            const alreadySaved = document.getElementById('plan_already_saved');
+            if (alreadySaved) alreadySaved.value = '';
+
+            if (data.width)  editorImgW = data.width;
+            if (data.height) editorImgH = data.height;
+
+            // ✅ Récupérer les annotations du SVG existant de la fiche
+            // (descriptions du formulaire prioritaires)
+            if (prevSvg) {
+                fetch(`${getBasePath()}/get_svg_annotations/${prevSvg}`)
+                    .then(r => r.json())
+                    .then(a => {
+                        const anns = _mergeFormDescriptions(
+                            (a.annotations || []).map(x =>
+                                _migrateAnnotation(x, a.width || editorImgW, a.height || editorImgH)));
+                        if (anns.length) {
+                            editorAnnotations = anns;
+                            nextAnnotationId  = Math.max(...anns.map(v => v.id)) + 1;
+                            editorDirty       = true;
+                            _restoreSizeFromAnnotations(anns);
+                            const s = document.getElementById('editorStatus');
+                            if (s) {
+                                s.textContent = `✔️ ${anns.length} annotation(s) existante(s) conservée(s) — cliquez sur Mettre à jour`;
+                                s.style.color = '#4CAF50';
+                            }
+                        }
+                    })
+                    .catch(() => { /* pas d'annotations récupérables — plan neuf */ });
+            }
         })
         .catch(err => {
             if (loadingOverlay) loadingOverlay.classList.remove('active');
-            alert('Erreur lors du chargement du SVG: ' + err.message);
+            input.value = '';
+            if (btn) btn.disabled = true;
+            alert('❌ Erreur conversion PDF : ' + err.message);
         });
 }
 
 // ============================================
-// Flush annotations to server just before form submit.
-//
-// Called with the final CPID already set in the form.
-//
-// Three cases:
-//   A) pendingImageFile set (brand-new file, never uploaded)
-//      → POST /create_exploded_view_with_annotations
-//   B) editorFilename set AND target CPID matches the SVG's CPID
-//      → POST /save_annotations  (update in place)
-//   C) editorFilename set BUT target CPID is DIFFERENT
-//      → extract image from pendingImageDataUrl, build a File blob,
-//        POST /create_exploded_view_with_annotations with new CPID.
+// EDITOR OPEN
 // ============================================
-function _flushAnnotationsToServer(base, submitAction, callback) {
+function _openNewImageInEditor(dataUrl) {
+    // ✅ Conserver les annotations récupérées de la fiche (pas de reset ici),
+    // descriptions du formulaire prioritaires
+    openEditorModal(dataUrl, _mergeFormDescriptions(editorAnnotations.slice()), null);
+}
+
+function _openEditorFromSVG(svgPath, base) {
     const loadingOverlay = document.getElementById('loadingOverlay');
     if (loadingOverlay) loadingOverlay.classList.add('active');
+    editorFilename = svgPath.split('/').pop();
 
-    // ── FIX: Read CPID from correct field based on action ──
-    const cpid = _getCurrentCpid(submitAction);
+    fetch(`${base}/get_svg_annotations/${svgPath}`)
+        .then(r => r.json())
+        .then(annData => {
+            // ✅ Les descriptions du FORMULAIRE (= base, plus récentes) écrasent
+            // celles stockées dans le SVG (potentiellement obsolètes)
+            const existing = _mergeFormDescriptions(
+                (annData.annotations || []).map(a =>
+                    _migrateAnnotation(a, annData.width || 1500, annData.height || 1300)));
+            editorAnnotations   = existing.slice();
+            nextAnnotationId    = editorAnnotations.length
+                ? Math.max(...editorAnnotations.map(a => a.id)) + 1 : 1;
+            editorDirty = false;
+            if (annData.width)  editorImgW = annData.width;
+            if (annData.height) editorImgH = annData.height;
+            _restoreSizeFromAnnotations(existing);
 
-    // Debug log — remove after confirming fix
-    console.debug('[flush] submitAction:', submitAction, '| cpid resolved:', cpid);
+            // ✅ arrayBuffer + TextDecoder pour gérer correctement l'encodage UTF-8
+            return fetch(`/static/uploads/${editorFilename}?t=${Date.now()}`)
+                .then(r => r.arrayBuffer())
+                .then(buf => {
+                    if (loadingOverlay) loadingOverlay.classList.remove('active');
 
-    if (!cpid) {
-        if (loadingOverlay) loadingOverlay.classList.remove('active');
-        alert('CPID introuvable. Veuillez saisir ou sélectionner une CPID avant de soumettre.');
-        return;
-    }
+                    const decoder = new TextDecoder('utf-8', { fatal: false });
+                    const svgText = decoder.decode(buf);
 
-    // Helper: derive expected SVG filename from a CPID string
-    // (mirrors werkzeug's secure_filename: keep alphanum, dot, dash, underscore)
-    function _cpidToSvgFilename(c) {
-        return c.replace(/[^a-zA-Z0-9._-]/g, '_') + '.svg';
-    }
+                    const parser = new DOMParser();
+                    const svgDoc = parser.parseFromString(svgText, 'image/svg+xml');
 
-    // ── Case A: brand-new image file (user picked a file, never uploaded) ──
-    if (pendingImageFile) {
-        const formData = new FormData();
-        formData.append("vue_eclatee_image", pendingImageFile);
-        formData.append("annotations", JSON.stringify(editorAnnotations));
-        formData.append("cpid", cpid);
+                    const parseError = svgDoc.querySelector('parsererror');
+                    if (parseError) {
+                        console.warn('SVG parse error détecté, fallback blob URL:', parseError.textContent);
+                    }
 
-        fetch(`${base}/create_exploded_view_with_annotations`, { method: 'POST', body: formData })
-            .then(r => r.json())
-            .then(data => {
-                if (loadingOverlay) loadingOverlay.classList.remove('active');
-                if (data.success && data.filename) {
-                    editorFilename      = data.filename;
-                    editorDirty         = false;
-                    pendingImageFile    = null;
-                    pendingImageDataUrl = null;
-                    const inp = document.getElementById('vue_eclatee_already_saved');
-                    if (inp) inp.value = editorFilename;
-                    callback();
-                } else {
-                    alert('Erreur lors de la création du SVG: ' + (data.error || 'Unknown'));
-                }
-            })
-            .catch(err => {
-                if (loadingOverlay) loadingOverlay.classList.remove('active');
-                alert('Erreur: ' + err.message);
-            });
-        return;
-    }
+                    const imgEl = svgDoc.getElementById('source-image');
+                    let imgHref = null;
+                    if (imgEl) {
+                        imgHref = imgEl.getAttribute('href') ||
+                                  imgEl.getAttributeNS('http://www.w3.org/1999/xlink', 'href');
+                    }
+                    if (imgHref && imgHref.startsWith('data:')) pendingImageDataUrl = imgHref;
 
-    if (!editorFilename) {
-        // Nothing to flush
-        if (loadingOverlay) loadingOverlay.classList.remove('active');
-        callback();
-        return;
-    }
-
-    // Determine whether target CPID matches the SVG we loaded
-    const targetSvgFilename = _cpidToSvgFilename(cpid);
-    const isSameCpid = (editorFilename === targetSvgFilename);
-
-    if (isSameCpid) {
-        // ── Case B: same CPID — update existing SVG annotations in place ──
-        fetch(`${base}/save_annotations`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ filename: editorFilename, annotations: editorAnnotations })
+                    // ✅ SVG vectoriel : retirer le groupe #annotations avant affichage
+                    let imageSrc;
+                    if (imgHref) {
+                        imageSrc = imgHref;
+                    } else {
+                        const annGroup = svgDoc.getElementById('annotations');
+                        if (annGroup && annGroup.parentNode) {
+                            annGroup.parentNode.removeChild(annGroup);
+                        }
+                        const cleaned = new XMLSerializer().serializeToString(svgDoc);
+                        const blob = new Blob([cleaned], { type: 'image/svg+xml' });
+                        imageSrc = URL.createObjectURL(blob);
+                    }
+                    openEditorModal(imageSrc, existing, null);
+                });
         })
-            .then(r => r.json())
-            .then(data => {
-                if (loadingOverlay) loadingOverlay.classList.remove('active');
-                if (data.success) {
-                    editorDirty = false;
-                    const inp = document.getElementById('vue_eclatee_already_saved');
-                    if (inp) inp.value = editorFilename;
-                    callback();
-                } else {
-                    alert('Erreur: ' + (data.error || 'Unknown'));
-                }
-            })
-            .catch(err => {
-                if (loadingOverlay) loadingOverlay.classList.remove('active');
-                alert('Erreur: ' + err.message);
-            });
-
-    } else {
-        // ── Case C: different CPID — build a File blob from the stored dataURL
-        //    and create a brand-new SVG named after the target CPID.
-        if (!pendingImageDataUrl || !pendingImageDataUrl.startsWith('data:')) {
+        .catch(err => {
             if (loadingOverlay) loadingOverlay.classList.remove('active');
-            alert('Impossible de créer le SVG: image source introuvable en mémoire.');
+            alert('Erreur: ' + err.message);
+        });
+}
+
+function _migrateAnnotation(a, imgW, imgH) {
+    if (a.dotX !== undefined) return a;
+    const lx = a.side === 'left' ? imgW * 0.07 : imgW * 0.93;
+    const ann = { id: a.id, description: a.description || '',
+                  dotX: a.x, dotY: a.y, labelX: a.labelX || lx, labelY: a.labelY || a.y };
+    if (a.annotationSize) ann.annotationSize = a.annotationSize;
+    return ann;
+}
+
+function _restoreSizeFromAnnotations(anns) {
+    for (const a of anns) {
+        if (a.annotationSize) {
+            annotationSize = a.annotationSize;
+            const sd = document.getElementById('sizeDisplay');
+            if (sd) sd.textContent = annotationSize.toFixed(1) + 'x';
             return;
         }
-
-        const [header, b64] = pendingImageDataUrl.split(',');
-        const mime   = header.split(':')[1].split(';')[0];
-        const binary = atob(b64);
-        const bytes  = new Uint8Array(binary.length);
-        for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-        const imageFile = new File(
-            [new Blob([bytes], { type: mime })],
-            'image.' + (mime.split('/')[1] || 'png'),
-            { type: mime }
-        );
-
-        const formData = new FormData();
-        formData.append("vue_eclatee_image", imageFile);
-        formData.append("annotations", JSON.stringify(editorAnnotations));
-        formData.append("cpid", cpid);
-
-        fetch(`${base}/create_exploded_view_with_annotations`, { method: 'POST', body: formData })
-            .then(r => r.json())
-            .then(data => {
-                if (loadingOverlay) loadingOverlay.classList.remove('active');
-                if (data.success && data.filename) {
-                    editorFilename      = data.filename;
-                    editorDirty         = false;
-                    pendingImageFile    = null;
-                    pendingImageDataUrl = null;
-                    const inp = document.getElementById('vue_eclatee_already_saved');
-                    if (inp) inp.value = editorFilename;
-                    callback();
-                } else {
-                    alert('Erreur lors de la création du SVG: ' + (data.error || 'Unknown'));
-                }
-            })
-            .catch(err => {
-                if (loadingOverlay) loadingOverlay.classList.remove('active');
-                alert('Erreur: ' + err.message);
-            });
     }
-}
-
-// ============================================
-// Form helpers
-// ============================================
-function clearForm() {
-    document.querySelectorAll('input[type="text"], input[type="hidden"][name$="_nl"], input[type="hidden"][name$="_en"], textarea').forEach(input => {
-        if (input.id !== 'updateRef' && input.name !== 'type') input.value = '';
-    });
-    document.querySelectorAll('.preview').forEach(img => {
-        img.src = ''; img.classList.add('d-none'); img.classList.remove('deleted');
-        img.style.border = ''; img.style.opacity = '1';
-    });
-    document.querySelectorAll('input[name^="delete_"]').forEach(i => i.value = 'false');
-    document.querySelectorAll('input[type="file"]').forEach(i => i.value = '');
-    const prev = document.getElementById('previous_ref');
-    if (prev) prev.value = '';
-    _resetEditorState();
-}
-
-function markImageForDeletion(fieldName, previewId) {
-    if (!confirm('Êtes-vous sûr de vouloir supprimer cette image ?')) return;
-    const del = document.getElementById(`delete_${fieldName}`);
-    if (del) del.value = "true";
-    const preview = document.getElementById(previewId);
-    if (preview) {
-        preview.classList.add('deleted');
-        preview.style.border = '3px solid red';
-        preview.style.opacity = '0.5';
-    }
-    const fileInput = document.querySelector(`input[name="${fieldName}"]`);
-    if (fileInput && fileInput.type === 'file') fileInput.value = '';
-    if (fieldName === 'vue_eclatee_image') {
-        _resetEditorState();
-    }
-}
-
-function previewImage(input, previewId) {
-    const preview = document.getElementById(previewId);
-    if (!preview) return;
-    if (input.files && input.files[0]) {
-        const reader = new FileReader();
-        reader.onload = e => {
-            preview.src = e.target.result;
-            preview.classList.remove('d-none', 'deleted');
-            preview.style.border = ''; preview.style.opacity = '1';
-            const del = document.getElementById(`delete_${input.name}`);
-            if (del) del.value = "false";
-        };
-        reader.readAsDataURL(input.files[0]);
-    } else {
-        preview.src = ''; preview.classList.add('d-none');
-    }
-}
-
-function handleImageUpload(input) {
-    const file     = input.files[0];
-    const errorDiv = document.getElementById('imgError');
-    const preview  = document.getElementById('explodedPreview');
-    const btn      = document.getElementById('btnEditImage');
-    if (!file) { if (errorDiv) errorDiv.style.display = "none"; return; }
-    const img    = new Image();
-    const reader = new FileReader();
-    reader.onload = function (e) {
-        img.src = e.target.result;
-        img.onload = function () {
-            if (img.width !== 700 || img.height !== 900) {
-                if (errorDiv) errorDiv.style.display = "block";
-                input.value = "";
-                if (preview) { preview.src = ""; preview.classList.add('d-none'); }
-                if (btn) { btn.disabled = true; btn.title = 'Image invalide (700×900 px requis)'; }
-                _resetEditorState();
-            } else {
-                if (errorDiv) errorDiv.style.display = "none";
-                if (preview) {
-                    preview.src = e.target.result;
-                    preview.classList.remove('d-none', 'deleted');
-                    preview.style.border = ''; preview.style.opacity = '1';
-                }
-                if (btn) { btn.disabled = false; btn.title = 'Éditer cette image'; }
-                const del = document.getElementById('delete_vue_eclatee_image');
-                if (del) del.value = "false";
-                // Reset editor — new file, will open locally when Éditer is clicked
-                editorAnnotations   = [];
-                editorDirty         = false;
-                pendingImageFile    = null;
-                pendingImageDataUrl = null;
-                currentVueEclateeImage = null;
-                editorFilename = '';
-                const alreadySaved = document.getElementById('vue_eclatee_already_saved');
-                if (alreadySaved) alreadySaved.value = '';
-            }
-        };
-    };
-    reader.readAsDataURL(file);
-}
-
-function checkExactSize(input, previewId, errorId, index) {
-    const file = input.files[0];
-    if (!file) return;
-    const img = new Image();
-    img.src = URL.createObjectURL(file);
-    img.onload = function () {
-        const preview  = document.getElementById(previewId);
-        const errorMsg = document.getElementById(errorId);
-        let rw, rh;
-        if (index === 'variantes')          { rw = 300;  rh = 300; }
-        else if (index === 'photo_produit') { rw = 1000; rh = 700; }
-        else if (index <= 5)                { rw = 400;  rh = 300; }
-        else                                { rw = 300;  rh = 940; }
-
-        if (img.width !== rw || img.height !== rh) {
-            if (errorMsg) { errorMsg.classList.remove('d-none'); errorMsg.style.display = "block"; }
-            if (preview)  { preview.classList.add("d-none"); preview.src = ""; }
-            input.value = ""; return;
-        }
-        if (errorMsg) { errorMsg.classList.add('d-none'); errorMsg.style.display = "none"; }
-        if (preview)  {
-            preview.src = img.src;
-            preview.classList.remove("d-none", "deleted");
-            preview.style.border = ''; preview.style.opacity = '1';
-        }
-        const del = document.getElementById(`delete_${input.name}`);
-        if (del) del.value = "false";
-    };
 }
 
 // ============================================
@@ -601,18 +557,31 @@ function openEditorModal(imageSrc, existingAnnotations, onCleanup) {
     editorAnnotations = existingAnnotations ? existingAnnotations.slice() : [];
     nextAnnotationId  = editorAnnotations.length
         ? Math.max(...editorAnnotations.map(a => a.id)) + 1 : 1;
+    placementMode = 'idle';
+    pendingDot    = null;
+    // ✅ Zoom réinitialisé à l'ouverture (vue entière)
+    editorZoom = 1; editorPanX = 0; editorPanY = 0;
+    const sd = document.getElementById('sizeDisplay');
+    if (sd) sd.textContent = annotationSize.toFixed(1) + 'x';
 
     editorImage = new Image();
     editorImage.onload = function () {
+        editorImgW = editorImage.naturalWidth  || editorImgW || 1500;
+        editorImgH = editorImage.naturalHeight || editorImgH || 1300;
         modal.style.display = 'flex';
-        drawEditor();
-        if (onCleanup) onCleanup();
-        const s = document.getElementById('editorStatus');
-        if (s) s.textContent = `${editorAnnotations.length} annotation(s)`;
+        document.body.classList.add('editor-open');
+        _ensureEditorZoomControls();
+        requestAnimationFrame(function () {
+            _resizeCanvasToContainer();
+            drawEditor();
+            if (onCleanup) onCleanup();
+            _updateStatus();
+            _updateEditorZoomBadge();
+        });
     };
     editorImage.onerror = function () {
         if (onCleanup) onCleanup();
-        alert("⚠️ Image introuvable. Veuillez re-uploader l'image.");
+        alert("⚠️ Image introuvable. Veuillez re-uploader le PDF.");
     };
     editorImage.src = imageSrc;
 
@@ -621,212 +590,743 @@ function openEditorModal(imageSrc, existingAnnotations, onCleanup) {
     editorCanvas.onmousedown   = handleMouseDown;
     editorCanvas.onmousemove   = handleMouseMove;
     editorCanvas.onmouseup     = handleMouseUp;
+    editorCanvas.onwheel       = handleEditorWheel;
+    editorCanvas.ondblclick    = handleEditorDblClick;
 }
 
-function closeEditor() {
-    const modal = document.getElementById('editorModal');
-    if (modal) modal.style.display = 'none';
-    if (editorCanvas) {
-        editorCanvas.onclick = editorCanvas.oncontextmenu =
-        editorCanvas.onmousedown = editorCanvas.onmousemove = editorCanvas.onmouseup = null;
-    }
-    isDragging = false; draggedAnnotation = null;
+// ============================================
+// ✅ ZOOM / PAN DE L'ÉDITEUR
+// ============================================
+function _drawDims() {
+    return {
+        dW: editorCanvas.width  * editorZoom,
+        dH: editorCanvas.height * editorZoom
+    };
 }
 
+function _clampEditorPan() {
+    const { dW, dH } = _drawDims();
+    editorPanX = Math.min(0, Math.max(editorCanvas.width  - dW, editorPanX));
+    editorPanY = Math.min(0, Math.max(editorCanvas.height - dH, editorPanY));
+}
+
+function _zoomEditorAt(factor, cx, cy) {
+    const old = editorZoom;
+    editorZoom = Math.min(EZOOM_MAX, Math.max(EZOOM_MIN, old * factor));
+    if (editorZoom === old) return;
+    if (cx === undefined) { cx = editorCanvas.width / 2; cy = editorCanvas.height / 2; }
+    const r = editorZoom / old;
+    editorPanX = cx - (cx - editorPanX) * r;
+    editorPanY = cy - (cy - editorPanY) * r;
+    _clampEditorPan();
+    drawEditor();
+    _updateEditorZoomBadge();
+}
+
+function handleEditorWheel(e) {
+    e.preventDefault();
+    const { cx, cy } = _getMousePos(e);
+    _zoomEditorAt(e.deltaY < 0 ? 1.2 : 1 / 1.2, cx, cy);
+}
+
+function handleEditorDblClick(e) {
+    e.preventDefault();
+    editorZoom = 1; editorPanX = 0; editorPanY = 0;
+    drawEditor();
+    _updateEditorZoomBadge();
+}
+
+function _updateEditorZoomBadge() {
+    const b = document.getElementById('_ezoom_pct');
+    if (b) b.textContent = Math.round(editorZoom * 100) + '%';
+}
+
+function _ensureEditorZoomControls() {
+    if (document.getElementById('_ezoom_pct')) return;
+    const toolbar = document.querySelector('.editor-toolbar');
+    if (!toolbar) return;
+    const wrap = document.createElement('div');
+    wrap.style.cssText = 'display:flex;align-items:center;gap:6px;margin-left:12px;';
+    wrap.innerHTML = `
+      <span style="font-size:13px;font-weight:600;color:#555;">🔍 Zoom:</span>
+      <button type="button" id="_ezoom_minus"
+              style="width:30px;height:30px;border:1px solid #ccc;border-radius:4px;
+                     background:#fff;font-size:18px;font-weight:700;cursor:pointer;
+                     line-height:1;padding:0;">−</button>
+      <span id="_ezoom_pct"
+            style="min-width:48px;text-align:center;font-weight:700;
+                   font-size:14px;color:#1565C0;">100%</span>
+      <button type="button" id="_ezoom_plus"
+              style="width:30px;height:30px;border:1px solid #ccc;border-radius:4px;
+                     background:#fff;font-size:18px;font-weight:700;cursor:pointer;
+                     line-height:1;padding:0;">+</button>`;
+    const closeBtn = toolbar.querySelector('.btn-close-editor');
+    toolbar.insertBefore(wrap, closeBtn || null);
+    document.getElementById('_ezoom_plus').onclick  = () => _zoomEditorAt(1.25);
+    document.getElementById('_ezoom_minus').onclick = () => _zoomEditorAt(1 / 1.25);
+}
+
+// ============================================
+// CANVAS SIZING
+// ============================================
+function _resizeCanvasToContainer() {
+    if (!editorCanvas || !editorImgW || !editorImgH || !editorImage) return;
+    const wrap = document.querySelector('.editor-canvas-wrap');
+    if (!wrap) return;
+    const W = wrap.offsetWidth, H = wrap.offsetHeight;
+    if (W <= 0 || H <= 0) return;
+    editorCanvas.width  = W;
+    editorCanvas.height = H;
+    editorCanvas.style.width  = W + 'px';
+    editorCanvas.style.height = H + 'px';
+    editorCtx = editorCanvas.getContext('2d');
+    _clampEditorPan();
+    drawEditor();
+}
+
+window.addEventListener('resize', function () {
+    if (document.getElementById('editorModal').style.display === 'flex')
+        requestAnimationFrame(_resizeCanvasToContainer);
+});
+window.addEventListener('orientationchange', function () {
+    if (document.getElementById('editorModal').style.display === 'flex')
+        setTimeout(_resizeCanvasToContainer, 200);
+});
+if (window.visualViewport) {
+    window.visualViewport.addEventListener('resize', function () {
+        if (document.getElementById('editorModal').style.display === 'flex')
+            requestAnimationFrame(_resizeCanvasToContainer);
+    });
+}
+(function () {
+    const wrap = document.querySelector('.editor-canvas-wrap');
+    if (!wrap || !window.ResizeObserver) return;
+    new ResizeObserver(function () {
+        if (document.getElementById('editorModal').style.display === 'flex')
+            requestAnimationFrame(_resizeCanvasToContainer);
+    }).observe(wrap);
+})();
+
+// ============================================
+// MOUSE POSITION — corrige le zoom navigateur
+// ============================================
+function _getMousePos(e) {
+    const rect   = editorCanvas.getBoundingClientRect();
+    const scaleX = editorCanvas.width  / rect.width;
+    const scaleY = editorCanvas.height / rect.height;
+    return {
+        cx: (e.clientX - rect.left) * scaleX,
+        cy: (e.clientY - rect.top)  * scaleY
+    };
+}
+
+// ============================================
+// COORDINATE HELPERS — stretch + zoom/pan
+// ============================================
+function _canvasToImageCoords(cx, cy) {
+    const { dW, dH } = _drawDims();
+    return {
+        x: Math.max(0, Math.min(editorImgW, ((cx - editorPanX) / dW) * editorImgW)),
+        y: Math.max(0, Math.min(editorImgH, ((cy - editorPanY) / dH) * editorImgH))
+    };
+}
+
+function _dotHitTest(imgX, imgY, ann) {
+    const { dW, dH } = _drawDims();
+    const sx = dW / editorImgW;
+    const sy = dH / editorImgH;
+    const rx = 10 / sx, ry = 10 / sy;
+    return ((imgX - ann.dotX)/rx)**2 + ((imgY - ann.dotY)/ry)**2 <= 1;
+}
+
+function _labelHitTest(imgX, imgY, ann) {
+    const { dW, dH } = _drawDims();
+    const sx     = dW / editorImgW;
+    const sy     = dH / editorImgH;
+    const baseR  = Math.max(14, dW / 55) * annotationSize;
+    const rx = baseR / sx, ry = baseR / sy;
+    return ((imgX - ann.labelX)/rx)**2 + ((imgY - ann.labelY)/ry)**2 <= 1;
+}
+
+// ============================================
+// DRAW — image étirée + zoom/pan
+// ============================================
 function drawEditor() {
     if (!editorImage || !editorCtx) return;
-    editorCtx.clearRect(0, 0, editorCanvas.width, editorCanvas.height);
-    editorCtx.drawImage(editorImage, 0, 0, 700, 900);
+    const W  = editorCanvas.width;
+    const H  = editorCanvas.height;
+    const { dW, dH } = _drawDims();
+    const sx = dW / editorImgW;
+    const sy = dH / editorImgH;
+
+    editorCtx.clearRect(0, 0, W, H);
+    editorCtx.fillStyle = '#ffffff';
+    editorCtx.fillRect(0, 0, W, H);
+    editorCtx.drawImage(editorImage, editorPanX, editorPanY, dW, dH);
+
+    // Pending dot
+    if (placementMode === 'waiting_label' && pendingDot) {
+        const px = editorPanX + pendingDot.x * sx;
+        const py = editorPanY + pendingDot.y * sy;
+        const r  = Math.max(5, dW / 120) * annotationSize;
+        editorCtx.fillStyle = '#FF6600';
+        editorCtx.beginPath(); editorCtx.arc(px, py, r, 0, Math.PI * 2); editorCtx.fill();
+        editorCtx.strokeStyle = '#FF6600'; editorCtx.lineWidth = 2;
+        editorCtx.beginPath(); editorCtx.arc(px, py, r * 2.2, 0, Math.PI * 2); editorCtx.stroke();
+    }
+
+    // Annotations
     editorAnnotations.forEach(ann => {
-        const lineStart = ann.side === 'left' ? 50 : 650;
-        editorCtx.strokeStyle = 'black'; editorCtx.lineWidth = 2;
-        editorCtx.beginPath(); editorCtx.moveTo(lineStart, ann.y); editorCtx.lineTo(ann.x, ann.y); editorCtx.stroke();
+        const dx = editorPanX + ann.dotX   * sx, dy = editorPanY + ann.dotY   * sy;
+        const lx = editorPanX + ann.labelX * sx, ly = editorPanY + ann.labelY * sy;
+
+        const lineW    = Math.max(1, dW / 600) * annotationSize;
+        const dotR     = Math.max(4, dW / 180) * annotationSize;
+        const circR    = Math.max(14, dW / 55)  * annotationSize;
+        const fontSize = Math.max(10, dW / 60)  * annotationSize;
+
+        editorCtx.strokeStyle = 'black';
+        editorCtx.lineWidth   = lineW;
+        editorCtx.beginPath(); editorCtx.moveTo(dx, dy); editorCtx.lineTo(lx, ly); editorCtx.stroke();
+
         editorCtx.fillStyle = 'black';
-        editorCtx.beginPath(); editorCtx.arc(ann.x, ann.y, 3, 0, Math.PI * 2); editorCtx.fill();
-        editorCtx.beginPath(); editorCtx.arc(lineStart, ann.y, 20, 0, Math.PI * 2); editorCtx.fill();
-        editorCtx.fillStyle = 'white'; editorCtx.font = 'bold 14px Arial';
-        editorCtx.textAlign = 'center'; editorCtx.textBaseline = 'middle';
-        editorCtx.fillText(ann.id, lineStart, ann.y);
+        editorCtx.beginPath(); editorCtx.arc(dx, dy, dotR, 0, Math.PI * 2); editorCtx.fill();
+
+        editorCtx.fillStyle = 'black';
+        editorCtx.beginPath(); editorCtx.arc(lx, ly, circR, 0, Math.PI * 2); editorCtx.fill();
+
+        editorCtx.fillStyle    = 'white';
+        editorCtx.font         = `bold ${fontSize}px Arial`;
+        editorCtx.textAlign    = 'center';
+        editorCtx.textBaseline = 'middle';
+        editorCtx.fillText(ann.id, lx, ly);
     });
 }
 
-function handleMouseDown(e) {
-    const rect = editorCanvas.getBoundingClientRect();
-    const x = e.clientX - rect.left, y = e.clientY - rect.top;
-    draggedAnnotation = editorAnnotations.find(ann =>
-        Math.sqrt(Math.pow(x - ann.x, 2) + Math.pow(y - ann.y, 2)) <= 5);
-    if (draggedAnnotation) {
-        isDragging = true; editorCanvas.style.cursor = 'move';
-        e.preventDefault(); e.stopPropagation();
-    }
-}
-
-function handleMouseMove(e) {
-    const rect = editorCanvas.getBoundingClientRect();
-    const x = e.clientX - rect.left, y = e.clientY - rect.top;
-    if (!isDragging || !draggedAnnotation) {
-        editorCanvas.style.cursor = editorAnnotations.some(ann =>
-            Math.sqrt(Math.pow(x - ann.x, 2) + Math.pow(y - ann.y, 2)) <= 5)
-            ? 'pointer' : 'default';
-        return;
-    }
-    draggedAnnotation.x = Math.max(0, Math.min(700, x));
-    draggedAnnotation.y = Math.max(0, Math.min(900, y));
-    drawEditor(); e.preventDefault();
-}
-
-function handleMouseUp() {
-    if (isDragging) { isDragging = false; draggedAnnotation = null; editorCanvas.style.cursor = 'default'; }
-}
-
+// ============================================
+// CLICK HANDLER
+// ============================================
 function handleEditorClick(e) {
     if (isDragging) return;
-    const rect = editorCanvas.getBoundingClientRect();
-    const x = e.clientX - rect.left, y = e.clientY - rect.top;
-    if (editorAnnotations.some(ann =>
-        Math.sqrt(Math.pow(x - ann.x, 2) + Math.pow(y - ann.y, 2)) <= 5)) return;
-    const side = x < 350 ? 'left' : 'right';
-    const num  = prompt("Entrez le numéro d'annotation:", nextAnnotationId);
-    if (num === null || num.trim() === '') return;
-    const id = parseInt(num);
-    if (isNaN(id) || id < 1) { alert('Numéro invalide'); return; }
-    editorAnnotations.push({ id, x, y, side });
-    nextAnnotationId = Math.max(nextAnnotationId, id + 1);
-    editorDirty = true;
-    drawEditor();
-    const s = document.getElementById('editorStatus');
-    if (s) s.textContent = `${editorAnnotations.length} annotation(s)`;
+    // ✅ Ne pas poser de point après un déplacement de vue (pan)
+    if (panMoved) { panMoved = false; return; }
+    if (e.ctrlKey || e.metaKey) return; // Ctrl réservé au pan
+    const { cx, cy } = _getMousePos(e);
+    const {x, y} = _canvasToImageCoords(cx, cy);
+
+    if (placementMode === 'idle') {
+        if (editorAnnotations.some(a => _labelHitTest(x, y, a))) return;
+        pendingDot    = { x, y };
+        placementMode = 'waiting_label';
+        drawEditor();
+        _updateStatus('🔶 Point posé — cliquez pour placer un cercle numéroté. Clic droit = nouveau point.');
+        return;
+    }
+
+    if (placementMode === 'waiting_label') {
+        if (editorAnnotations.some(a => _labelHitTest(x, y, a))) return;
+        const labelX = x, labelY = y;
+        _showAnnotationModal(nextAnnotationId, function(id, description) {
+            if (id === null) {
+                placementMode = 'idle'; pendingDot = null;
+                drawEditor(); _updateStatus(); return;
+            }
+            editorAnnotations.push({
+                id, description: description || '',
+                dotX: pendingDot.x, dotY: pendingDot.y, labelX, labelY,
+            });
+            nextAnnotationId = Math.max(nextAnnotationId, id + 1);
+            editorDirty = true;
+            drawEditor();
+            _updateStatus('🔶 Même point actif — cliquez encore pour un autre cercle. Clic droit = nouveau point.');
+        });
+    }
 }
 
 function handleEditorRightClick(e) {
     e.preventDefault();
-    const rect = editorCanvas.getBoundingClientRect();
-    const x = e.clientX - rect.left, y = e.clientY - rect.top;
-    const idx = editorAnnotations.findIndex(ann => {
-        const ls = ann.side === 'left' ? 50 : 650;
-        return Math.sqrt(Math.pow(x - ls, 2) + Math.pow(y - ann.y, 2)) <= 20;
-    });
+    const { cx, cy } = _getMousePos(e);
+    const {x, y} = _canvasToImageCoords(cx, cy);
+
+    if (placementMode === 'waiting_label') {
+        placementMode = 'idle'; pendingDot = null;
+        drawEditor(); _updateStatus('✅ Point relâché — cliquez pour poser un nouveau point.');
+        return false;
+    }
+    const idx = editorAnnotations.findIndex(a => _labelHitTest(x, y, a));
     if (idx !== -1) {
         editorAnnotations.splice(idx, 1);
         editorDirty = true;
-        drawEditor();
-        const s = document.getElementById('editorStatus');
-        if (s) s.textContent = `${editorAnnotations.length} annotation(s)`;
+        drawEditor(); _updateStatus();
+        requestAnimationFrame(_syncFormFieldsFromAnnotations);
     }
     return false;
 }
 
+// ============================================
+// DRAG (annotations) + PAN (vue)
+// ============================================
+function handleMouseDown(e) {
+    // ✅ Pan : clic molette OU Ctrl + clic gauche
+    if (e.button === 1 || (e.button === 0 && (e.ctrlKey || e.metaKey))) {
+        const { cx, cy } = _getMousePos(e);
+        isPanningEditor = true; panMoved = false;
+        panStartCx = cx; panStartCy = cy;
+        panOrigX = editorPanX; panOrigY = editorPanY;
+        editorCanvas.style.cursor = 'grabbing';
+        e.preventDefault(); e.stopPropagation();
+        return;
+    }
+    if (placementMode !== 'idle') return;
+    const { cx, cy } = _getMousePos(e);
+    const {x, y} = _canvasToImageCoords(cx, cy);
+    for (const ann of editorAnnotations) {
+        if (_dotHitTest(x, y, ann)) {
+            dragTarget = { ann, part: 'dot' }; isDragging = true;
+            editorCanvas.style.cursor = 'move';
+            e.preventDefault(); e.stopPropagation(); return;
+        }
+        if (_labelHitTest(x, y, ann)) {
+            dragTarget = { ann, part: 'label' }; isDragging = true;
+            editorCanvas.style.cursor = 'move';
+            e.preventDefault(); e.stopPropagation(); return;
+        }
+    }
+}
+
+function handleMouseMove(e) {
+    const { cx, cy } = _getMousePos(e);
+
+    // ✅ Déplacement de la vue en cours
+    if (isPanningEditor) {
+        editorPanX = panOrigX + (cx - panStartCx);
+        editorPanY = panOrigY + (cy - panStartCy);
+        if (Math.abs(cx - panStartCx) > 3 || Math.abs(cy - panStartCy) > 3) panMoved = true;
+        _clampEditorPan();
+        drawEditor();
+        e.preventDefault();
+        return;
+    }
+
+    const {x, y} = _canvasToImageCoords(cx, cy);
+    if (!isDragging || !dragTarget) {
+        editorCanvas.style.cursor = (placementMode === 'waiting_label') ? 'crosshair'
+            : (editorAnnotations.some(a => _dotHitTest(x, y, a) || _labelHitTest(x, y, a)) ? 'pointer' : 'crosshair');
+        return;
+    }
+    const ix = Math.max(0, Math.min(editorImgW, x));
+    const iy = Math.max(0, Math.min(editorImgH, y));
+    if (dragTarget.part === 'dot')   { dragTarget.ann.dotX   = ix; dragTarget.ann.dotY   = iy; }
+    else                             { dragTarget.ann.labelX = ix; dragTarget.ann.labelY = iy; }
+    drawEditor(); e.preventDefault();
+}
+
+function handleMouseUp() {
+    if (isPanningEditor) {
+        isPanningEditor = false;
+        editorCanvas.style.cursor = 'crosshair';
+        return;
+    }
+    if (isDragging) {
+        isDragging = false; dragTarget = null;
+        editorCanvas.style.cursor = 'crosshair'; editorDirty = true;
+    }
+}
+
+// ============================================
+// TOOLBAR
+// ============================================
 function clearAllAnnotations() {
     if (confirm('Supprimer toutes les annotations ?')) {
         editorAnnotations = []; nextAnnotationId = 1; editorDirty = true;
-        drawEditor();
-        const s = document.getElementById('editorStatus');
-        if (s) s.textContent = '0 annotation(s)';
+        placementMode = 'idle'; pendingDot = null;
+        drawEditor(); _updateStatus();
+        requestAnimationFrame(_syncFormFieldsFromAnnotations);
     }
 }
 
-// ============================================
-// "Enregistrer" in editor popup:
-// Saves annotations IN MEMORY only. Updates preview from canvas.
-// Actual SVG write happens only when the main form is submitted.
-// ============================================
 function saveEditorAnnotations() {
-    if (editorCanvas) {
-        const preview = document.getElementById('explodedPreview');
-        if (preview) {
-            preview.src = editorCanvas.toDataURL('image/png');
-            preview.classList.remove('d-none', 'deleted');
-            preview.style.border = '2px solid #4CAF50';
-            preview.style.opacity = '1';
-            setTimeout(() => { if (preview) preview.style.border = ''; }, 2000);
+    // Canvas temporaire aux dimensions ORIGINALES de l'image (preview uniquement —
+    // le SVG final est généré côté serveur en vectoriel)
+    const tempCanvas  = document.createElement('canvas');
+    tempCanvas.width  = editorImgW;
+    tempCanvas.height = editorImgH;
+    const tempCtx = tempCanvas.getContext('2d');
+
+    tempCtx.fillStyle = '#ffffff';
+    tempCtx.fillRect(0, 0, editorImgW, editorImgH);
+    tempCtx.drawImage(editorImage, 0, 0, editorImgW, editorImgH);
+
+    editorAnnotations.forEach(ann => {
+        const dx = ann.dotX,   dy = ann.dotY;
+        const lx = ann.labelX, ly = ann.labelY;
+
+        const lineW    = Math.max(1,  editorImgW / 600) * annotationSize;
+        const dotR     = Math.max(4,  editorImgW / 180) * annotationSize;
+        const circR    = Math.max(14, editorImgW / 55)  * annotationSize;
+        const fontSize = Math.max(10, editorImgW / 60)  * annotationSize;
+
+        tempCtx.strokeStyle = 'black';
+        tempCtx.lineWidth   = lineW;
+        tempCtx.beginPath(); tempCtx.moveTo(dx, dy); tempCtx.lineTo(lx, ly); tempCtx.stroke();
+
+        tempCtx.fillStyle = 'black';
+        tempCtx.beginPath(); tempCtx.arc(dx, dy, dotR, 0, Math.PI * 2); tempCtx.fill();
+
+        tempCtx.fillStyle = 'black';
+        tempCtx.beginPath(); tempCtx.arc(lx, ly, circR, 0, Math.PI * 2); tempCtx.fill();
+
+        tempCtx.fillStyle    = 'white';
+        tempCtx.font         = `bold ${fontSize}px Arial`;
+        tempCtx.textAlign    = 'center';
+        tempCtx.textBaseline = 'middle';
+        tempCtx.fillText(ann.id, lx, ly);
+    });
+
+    const preview = document.getElementById('explodedPreview');
+    if (preview) {
+        try {
+            preview.src = tempCanvas.toDataURL('image/png');
+        } catch (err) {
+            console.warn('Preview non générée:', err.message);
         }
+        preview.classList.remove('d-none', 'deleted');
+        preview.style.border  = '2px solid #4CAF50';
+        preview.style.opacity = '1';
+        setTimeout(() => { if (preview) preview.style.border = ''; }, 2000);
     }
+
     editorDirty = true;
-    const s = document.getElementById('editorStatus');
-    if (s) {
-        s.textContent = '✔️ Prêt — cliquez "Mettre à jour" pour enregistrer définitivement';
-        s.style.color = '#4CAF50';
+    _closeEditorKeepState();
+    requestAnimationFrame(function () {
+        _syncFormFieldsFromAnnotations();
+        const s = document.getElementById('editorStatus');
+        if (s) {
+            s.textContent = '✔️ Annotations prêtes — cliquez sur Mettre à jour ou Ajouter';
+            s.style.color = '#4CAF50';
+        }
+    });
+}
+
+function _closeEditorKeepState() {
+    placementMode = 'idle'; pendingDot = null;
+    const modal = document.getElementById('editorModal');
+    if (modal) modal.style.display = 'none';
+    document.body.classList.remove('editor-open');
+    if (editorCanvas) {
+        editorCanvas.onclick = editorCanvas.oncontextmenu =
+        editorCanvas.onmousedown = editorCanvas.onmousemove =
+        editorCanvas.onmouseup = editorCanvas.onwheel =
+        editorCanvas.ondblclick = null;
     }
-    setTimeout(() => closeEditor(), 900);
+    isDragging = false; dragTarget = null;
+    isPanningEditor = false;
+}
+
+function closeEditor() { _closeEditorKeepState(); editorDirty = false; }
+
+function changeSize(delta) {
+    annotationSize = Math.round(
+        Math.min(SIZE_MAX, Math.max(SIZE_MIN, annotationSize + delta)) * 10
+    ) / 10;
+    document.getElementById('sizeDisplay').textContent = annotationSize.toFixed(1) + 'x';
+    drawEditor();
+}
+
+function _updateStatus(msg) {
+    const s = document.getElementById('editorStatus');
+    if (!s) return;
+    if (msg) {
+        s.textContent = msg; s.style.color = '#FF6600';
+    } else if (placementMode === 'waiting_label') {
+        s.textContent = '🔶 Point actif — cliquez pour ajouter un cercle | Clic droit = nouveau point';
+        s.style.color = '#FF6600';
+    } else {
+        s.textContent = `${editorAnnotations.length} annotation(s) — Molette = zoom · Ctrl+glisser = déplacer`;
+        s.style.color = '';
+    }
 }
 
 // ============================================
-// Navigation / Delete
+// SYNC FORM FIELDS FROM ANNOTATIONS
 // ============================================
+function _syncFormFieldsFromAnnotations() {
+    const maxVue = 200;
+
+    // ✅ Sauvegarder les descriptions déjà saisies dans le formulaire
+    const savedDescs = _formDescriptionsByNumber();
+
+    for (let i = 1; i <= maxVue; i++) {
+        const n     = document.getElementById('number_' + i);
+        const d     = document.getElementById('description_' + i);
+        const badge = document.getElementById('badge_' + i);
+        if (n) n.value = '';
+        if (d) d.value = '';
+        if (badge) badge.textContent = i;
+    }
+    editorAnnotations.forEach((a, idx) => {
+        const slot  = idx + 1;
+        if (slot > maxVue) return;
+        const n     = document.getElementById('number_' + slot);
+        const d     = document.getElementById('description_' + slot);
+        const badge = document.getElementById('badge_' + slot);
+        if (n) n.value = String(a.id);
+        // ✅ Priorité : description de l'annotation, sinon celle du formulaire
+        if (d) d.value = (a.description || '').trim() || savedDescs[a.id] || '';
+        if (badge) badge.textContent = String(a.id);
+    });
+    if (typeof refreshComposantRows === 'function') refreshComposantRows();
+}
+
+// ============================================
+// FLUSH TO SERVER
+// ============================================
+function _annotationsForServer() {
+    // ✅ Les descriptions saisies dans le formulaire COMPOSANTS sont prioritaires
+    const formDescs = _formDescriptionsByNumber();
+    return editorAnnotations.map(a => ({
+        id: a.id,
+        description: formDescs[a.id] !== undefined
+            ? formDescs[a.id]
+            : (a.description || ''),
+        x: a.dotX, y: a.dotY, labelX: a.labelX, labelY: a.labelY,
+        side: 'free', annotationSize: annotationSize,
+    }));
+}
+
+function _flushAnnotationsToServer(base, submitAction, callback) {
+    const loadingOverlay = document.getElementById('loadingOverlay');
+    if (loadingOverlay) loadingOverlay.classList.add('active');
+    const cpid = _getCurrentCpid(submitAction);
+
+    if (!cpid) {
+        if (loadingOverlay) loadingOverlay.classList.remove('active');
+        alert('Name introuvable. Veuillez saisir ou sélectionner un Name.');
+        return;
+    }
+
+    function _doUpload(imageFile) {
+        const fd = new FormData();
+        fd.append("plan", imageFile);
+        fd.append("annotations", JSON.stringify(_annotationsForServer()));
+        fd.append("name", cpid); fd.append("cpid", cpid);
+        fetch(`${base}/create_exploded_view_with_annotations`, { method: 'POST', body: fd })
+            .then(r => r.json())
+            .then(data => {
+                if (loadingOverlay) loadingOverlay.classList.remove('active');
+                if (data.success && data.filename) {
+                    editorFilename      = data.filename;
+                    editorDirty         = false;
+                    pendingImageFile    = null;
+                    pendingImageDataUrl = null;
+                    const inp = document.getElementById('plan_already_saved');
+                    if (inp) inp.value = editorFilename;
+                    callback();
+                } else { alert('Erreur SVG: ' + (data.error || 'Unknown')); }
+            })
+            .catch(err => {
+                if (loadingOverlay) loadingOverlay.classList.remove('active');
+                alert('Erreur: ' + err.message);
+            });
+    }
+
+    // ✅ Un PDF a été uploadé → le serveur le convertit en SVG vectoriel
+    if (pendingImageFile) { _doUpload(pendingImageFile); return; }
+
+    // ✅ Fiche existante (SVG déjà sur le serveur) → réinjection des annotations
+    if (editorFilename) {
+        fetch(`${base}/save_annotations`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ filename: editorFilename, annotations: _annotationsForServer() })
+        })
+            .then(r => r.json())
+            .then(data => {
+                if (loadingOverlay) loadingOverlay.classList.remove('active');
+                if (data.success) {
+                    editorDirty = false;
+                    const targetSvgFilename = cpid.replace(/[^a-zA-Z0-9._-]/g, '_') + '.svg';
+                    const inp = document.getElementById('plan_already_saved');
+                    if (inp) inp.value = (editorFilename === targetSvgFilename) ? editorFilename : '';
+                    callback();
+                } else { alert('Erreur: ' + (data.error || 'Unknown')); }
+            })
+            .catch(err => {
+                if (loadingOverlay) loadingOverlay.classList.remove('active');
+                alert('Erreur: ' + err.message);
+            });
+        return;
+    }
+
+    if (loadingOverlay) loadingOverlay.classList.remove('active');
+    alert('Image source introuvable en mémoire. Veuillez re-uploader le PDF.');
+}
+
+// ============================================
+// FORM HELPERS
+// ============================================
+function clearForm() {
+    document.querySelectorAll('#mainForm input[type="text"], #mainForm input[type="date"], #mainForm textarea')
+        .forEach(i => { i.value = ''; });
+    document.querySelectorAll('.preview').forEach(img => {
+        img.src = ''; img.classList.add('d-none');
+        img.classList.remove('deleted'); img.style.border = ''; img.style.opacity = '1';
+    });
+    document.querySelectorAll('input[name^="delete_"]').forEach(i => i.value = 'false');
+    document.querySelectorAll('input[type="file"]').forEach(i => i.value = '');
+    const prev = document.getElementById('previous_ref');
+    if (prev) prev.value = '';
+    const sizeDisplay = document.getElementById('imageSizeDisplay');
+    if (sizeDisplay) sizeDisplay.style.display = 'none';
+    _resetEditorState();
+    if (typeof refreshComposantRows === 'function') refreshComposantRows();
+}
+
+function markImageForDeletion(fieldName, previewId) {
+    if (!confirm('Êtes-vous sûr de vouloir supprimer cette image ?')) return;
+    const del = document.getElementById(`delete_${fieldName}`);
+    if (del) del.value = "true";
+    const preview = document.getElementById(previewId);
+    if (preview) {
+        preview.classList.add('deleted');
+        preview.style.border  = '3px solid red';
+        preview.style.opacity = '0.5';
+    }
+    const fileInput = document.querySelector(`input[name="${fieldName}"]`);
+    if (fileInput && fileInput.type === 'file') fileInput.value = '';
+    if (fieldName === 'plan') {
+        _resetEditorState();
+        const sizeDisplay = document.getElementById('imageSizeDisplay');
+        if (sizeDisplay) sizeDisplay.style.display = 'none';
+    }
+}
+
 function GOficheTechnique() {
-    const cpid = document.getElementById("updateRef").value;
+    const name = document.getElementById("updateRef").value;
     const base = getBasePath();
-    if (!cpid) { alert('Sélectionnez une CPID'); return; }
-    window.location.href = `${base}/index?cpid=${cpid}`;
+    if (!name) { alert('Sélectionnez un Name'); return; }
+    window.location.href = `${base}/index?name=${encodeURIComponent(name)}`;
 }
 
 function confirmDelete() {
     const ref = document.getElementById("updateRef").value;
-    if (!ref) { alert('Sélectionnez une CPID à supprimer'); return; }
-    if (confirm(`Êtes-vous sûr de vouloir supprimer la fiche "${ref}" (versions FR, EN et NL) ?`)) {
+    if (!ref) { alert('Sélectionnez un Name à supprimer'); return; }
+    if (confirm(`Supprimer "${ref}" ?`)) {
         const base = getBasePath();
         const form = document.createElement("form");
         form.method = "POST"; form.action = `${base}/delete_fiche`;
-        const i1 = document.createElement("input"); i1.type="hidden"; i1.name="deleteRef"; i1.value=ref;
-        const i2 = document.createElement("input"); i2.type="hidden"; i2.name="type";
-        const ct = document.querySelector('input[name="type"]:checked');
-        i2.value = ct ? ct.value : 'Cloison';
-        form.appendChild(i1); form.appendChild(i2);
-        document.body.appendChild(form); form.submit();
+        const i1 = document.createElement("input");
+        i1.type = "hidden"; i1.name = "deleteRef"; i1.value = ref;
+        form.appendChild(i1); document.body.appendChild(form); form.submit();
     }
 }
 
 // ============================================
-// Translation modal + Searchable Dropdown
+// ✅ VISIONNEUSE SVG PLEIN ÉCRAN (dans la page)
 // ============================================
-document.addEventListener('DOMContentLoaded', function () {
-    const modalOverlay = document.getElementById('modalOverlay');
-    const closeBtn     = document.getElementById('closeBtn');
-    const ignoreBtn    = document.getElementById('ignoreBtn');
-    const saveBtn      = document.getElementById('saveBtn');
-    const modalTitle   = document.getElementById('modalTitle');
-    const inputFR      = document.getElementById('trans_fr');
-    const inputEN      = document.getElementById('trans_en');
-    const inputNL      = document.getElementById('trans_nl');
-    let currentField=null, currentInput=null, currentInputEN=null, currentInputNL=null;
+let _vwZoom = 1;
 
-    document.querySelectorAll('.o_field_translate').forEach(btn => {
-        btn.addEventListener('click', function (e) {
-            e.preventDefault(); e.stopPropagation();
-            currentField   = this.dataset.field;
-            currentInput   = document.querySelector(`[name="${currentField}"]`) || document.getElementById(currentField);
-            currentInputEN = document.getElementById(currentField + '_en');
-            currentInputNL = document.getElementById(currentField + '_nl');
-            if (!currentInput) return;
-            modalTitle.textContent = `Modifier : ${currentField}`;
-            inputFR.value = currentInput.value || '';
-            inputEN.value = currentInputEN ? (currentInputEN.value || '') : '';
-            inputNL.value = currentInputNL ? (currentInputNL.value || '') : '';
-            modalOverlay.classList.add('active');
-        });
-    });
+function _openSvgViewer(url) {
+    const old = document.getElementById('svgViewerOverlay');
+    if (old) old.remove();
+    _vwZoom = 1;
 
-    if (saveBtn) saveBtn.addEventListener('click', function () {
-        if (currentInput)   currentInput.value   = inputFR.value;
-        if (currentInputEN) currentInputEN.value  = inputEN.value;
-        if (currentInputNL) currentInputNL.value  = inputNL.value;
-        closeModal();
-    });
-    if (ignoreBtn) ignoreBtn.addEventListener('click', closeModal);
-    if (closeBtn)  closeBtn.addEventListener('click', closeModal);
-    if (modalOverlay) modalOverlay.addEventListener('click', e => { if (e.target === modalOverlay) closeModal(); });
-    document.addEventListener('keydown', e => {
-        if (e.key === 'Escape' && modalOverlay && modalOverlay.classList.contains('active')) closeModal();
-    });
-    function closeModal() {
-        if (modalOverlay) modalOverlay.classList.remove('active');
-        currentField=currentInput=currentInputEN=currentInputNL=null;
-        if (inputFR) inputFR.value='';
-        if (inputEN) inputEN.value='';
-        if (inputNL) inputNL.value='';
+    const ov = document.createElement('div');
+    ov.id = 'svgViewerOverlay';
+    ov.style.cssText =
+        'position:fixed;inset:0;z-index:99998;background:#fff;' +
+        'display:flex;flex-direction:column;font-family:Inter,Arial,sans-serif;';
+
+    ov.innerHTML = `
+      <div style="flex:0 0 auto;display:flex;gap:10px;align-items:center;
+                  padding:10px 14px;border-bottom:1px solid #e2e8f0;background:#f8fafc;">
+        <button id="_vw_back"
+                style="padding:8px 18px;border:1px solid #cbd5e1;border-radius:7px;
+                       background:#fff;font-size:13px;font-weight:600;cursor:pointer;">
+          ← Retour
+        </button>
+        <button id="_vw_minus"
+                style="width:34px;height:34px;border:1px solid #cbd5e1;border-radius:7px;
+                       background:#fff;font-size:18px;font-weight:700;cursor:pointer;">−</button>
+        <span id="_vw_pct"
+              style="min-width:56px;text-align:center;font-weight:700;
+                     font-size:13px;color:#2563eb;">100%</span>
+        <button id="_vw_plus"
+                style="width:34px;height:34px;border:1px solid #cbd5e1;border-radius:7px;
+                       background:#fff;font-size:18px;font-weight:700;cursor:pointer;">+</button>
+        <span style="color:#94a3b8;font-size:12px;">
+          Molette = zoom · Glisser = déplacer · Échap = retour
+        </span>
+      </div>
+      <div id="_vw_scroll" style="flex:1;overflow:auto;background:#e9ecef;cursor:grab;">
+        <img id="_vw_img" src="${url}"
+             style="display:block;background:#fff;box-shadow:0 2px 12px rgba(0,0,0,.15);
+                    margin:20px auto;" draggable="false">
+      </div>`;
+
+    document.body.appendChild(ov);
+
+    const scroll = document.getElementById('_vw_scroll');
+    const img    = document.getElementById('_vw_img');
+    const pct    = document.getElementById('_vw_pct');
+
+    function _apply() {
+        img.style.width = Math.round((scroll.clientWidth - 40) * _vwZoom) + 'px';
+        pct.textContent = Math.round(_vwZoom * 100) + '%';
+    }
+    _apply();
+
+    function _zoomAt(factor, cx, cy) {
+        const oldZoom = _vwZoom;
+        _vwZoom = Math.min(20, Math.max(0.2, _vwZoom * factor));
+        if (_vwZoom === oldZoom) return;
+        const ratio = _vwZoom / oldZoom;
+        const rect  = scroll.getBoundingClientRect();
+        const px = (cx !== undefined ? cx - rect.left : rect.width  / 2);
+        const py = (cy !== undefined ? cy - rect.top  : rect.height / 2);
+        const sx = scroll.scrollLeft, sy = scroll.scrollTop;
+        _apply();
+        scroll.scrollLeft = (sx + px) * ratio - px;
+        scroll.scrollTop  = (sy + py) * ratio - py;
     }
 
-    // ── Searchable Dropdown ──
+    scroll.addEventListener('wheel', function (e) {
+        e.preventDefault();
+        _zoomAt(e.deltaY < 0 ? 1.2 : 1 / 1.2, e.clientX, e.clientY);
+    }, { passive: false });
+
+    document.getElementById('_vw_plus').onclick  = () => _zoomAt(1.25);
+    document.getElementById('_vw_minus').onclick = () => _zoomAt(1 / 1.25);
+
+    let panning = false, startX = 0, startY = 0, startL = 0, startT = 0;
+    scroll.addEventListener('mousedown', function (e) {
+        panning = true; startX = e.clientX; startY = e.clientY;
+        startL = scroll.scrollLeft; startT = scroll.scrollTop;
+        scroll.style.cursor = 'grabbing';
+        e.preventDefault();
+    });
+    window.addEventListener('mousemove', function (e) {
+        if (!panning) return;
+        scroll.scrollLeft = startL - (e.clientX - startX);
+        scroll.scrollTop  = startT - (e.clientY - startY);
+    });
+    window.addEventListener('mouseup', function () {
+        panning = false;
+        scroll.style.cursor = 'grab';
+    });
+
+    function _close() {
+        ov.remove();
+        document.removeEventListener('keydown', _esc);
+    }
+    function _esc(e) { if (e.key === 'Escape') _close(); }
+    document.getElementById('_vw_back').onclick = _close;
+    document.addEventListener('keydown', _esc);
+}
+
+// ============================================
+// DROPDOWN
+// ============================================
+document.addEventListener('DOMContentLoaded', function () {
     const dropdownHeader = document.getElementById('dropdownHeader');
     const dropdownMenu   = document.getElementById('dropdownMenu');
     const dropdownList   = document.getElementById('dropdownList');
@@ -840,27 +1340,22 @@ document.addEventListener('DOMContentLoaded', function () {
             dropdownMenu.classList.toggle('active');
             if (dropdownMenu.classList.contains('active') && searchInput) searchInput.focus();
         });
-        dropdownHeader.addEventListener('keydown', (e) => {
-            if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); dropdownHeader.click(); }
-        });
     }
     if (dropdownList) {
         dropdownList.addEventListener('click', (e) => {
             const item = e.target.closest('.dropdown-item-custom');
-            if (item) {
-                document.querySelectorAll('.dropdown-item-custom').forEach(i => i.classList.remove('selected'));
-                item.classList.add('selected');
-                if (selectedValue) selectedValue.textContent = item.querySelector('span').textContent;
-                if (hiddenSelect) {
-                    hiddenSelect.value = item.dataset.value;
-                    if (item.dataset.value) { hiddenSelect.dispatchEvent(new Event('change')); }
-                    else { clearForm(); }
-                }
-                if (dropdownHeader) dropdownHeader.classList.remove('active');
-                if (dropdownMenu)   dropdownMenu.classList.remove('active');
-                if (searchInput)    searchInput.value = '';
-                document.querySelectorAll('.dropdown-item-custom').forEach(i => i.style.display = 'flex');
+            if (!item) return;
+            document.querySelectorAll('.dropdown-item-custom').forEach(i => i.classList.remove('selected'));
+            item.classList.add('selected');
+            if (selectedValue) selectedValue.textContent = item.querySelector('span').textContent;
+            if (hiddenSelect) {
+                hiddenSelect.value = item.dataset.value;
+                hiddenSelect.dispatchEvent(new Event('change'));
             }
+            if (dropdownHeader) dropdownHeader.classList.remove('active');
+            if (dropdownMenu)   dropdownMenu.classList.remove('active');
+            if (searchInput)    searchInput.value = '';
+            document.querySelectorAll('.dropdown-item-custom').forEach(i => i.style.display = 'flex');
         });
     }
     if (searchInput) {
@@ -872,14 +1367,9 @@ document.addEventListener('DOMContentLoaded', function () {
         });
     }
     document.addEventListener('click', (e) => {
-        if (dropdownHeader && !e.target.closest('.custom-dropdown')) {
-            dropdownHeader.classList.remove('active');
-            if (dropdownMenu) dropdownMenu.classList.remove('active');
+        if (!e.target.closest('.custom-dropdown')) {
+            if (dropdownHeader) dropdownHeader.classList.remove('active');
+            if (dropdownMenu)   dropdownMenu.classList.remove('active');
         }
     });
-    if (dropdownMenu) {
-        dropdownMenu.addEventListener('click', (e) => {
-            if (e.target !== searchInput && !e.target.closest('.dropdown-item-custom')) e.stopPropagation();
-        });
-    }
 });

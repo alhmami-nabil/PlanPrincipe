@@ -1,11 +1,9 @@
-/* ==================== FONTS ==================== */
 @font-face {
     font-family: 'TecniboDisplay';
     src: url('/static/fonts/TECNIBO-DISPLAY.otf') format('opentype');
     font-weight: normal;
     font-style: normal;
 }
-
 @font-face {
     font-family: 'UniversalSans500';
     src: url('/static/fonts/UniversalSans-500.ttf') format('truetype');
@@ -13,506 +11,437 @@
     font-style: normal;
 }
 
+*{ margin:0; padding:0; box-sizing:border-box; }
 
-
-.Telecharger {
-  text-align: center;
-  margin-top: 20px;
+body{
+    background:#888;
+    display:flex;
+    justify-content:center;
+    align-items:flex-start;
+    min-height:100vh;
+    padding:20px;
+    flex-direction:column;
+    gap:12px;
 }
 
-.Telecharger button {
-  background-color: #000;
-  color: white;
-  font-family: 'UniversalSans500', sans-serif;
-  font-size: 12px;
-  border: none;
-  border-radius: 6px;
-  padding: 10px 20px;
-  cursor: pointer;
-  transition: background-color 0.3s ease;
+/* ── PRINT TOOLBAR ── */
+.print-toolbar{
+    display:flex;
+    gap:10px;
+    align-self:center;
+}
+.print-toolbar button{
+    padding:8px 18px;
+    border:none;
+    border-radius:4px;
+    font-family: 'UniversalSans500', Arial, sans-serif;
+    font-size:13px;
+    font-weight:bold;
+    cursor:pointer;
+    background:#333;
+    color:#fff;
+    transition:background 0.2s;
+}
+.print-toolbar button:hover{ background:#000; }
+.print-toolbar button.active{ background:#0055cc; }
+
+/* ── SHEET ── */
+.sheet{
+    width:1400px;
+    height:950px;
+    background:#fff;
+    position:relative;
+    box-shadow:0 8px 30px rgba(0,0,0,.4);
+    align-self:center;
 }
 
-.Telecharger button:hover {
-  background-color: #333;
+/* ── OUTER MARGIN LINE ── */
+.sheet::before{
+    content:'';
+    position:absolute;
+    inset:10px;
+    border:1px solid #000;
+    pointer-events:none;
+    z-index:0;
 }
 
+/* ── BORDER STRIPS ── */
+/* Top & Bottom : 1 vide + 12 numéros + 1 vide = 14 cellules */
+.bt{
+    position:absolute;
+    top:10px; left:10px; right:10px; height:20px;
+    display:grid;
+    grid-template-columns: 20px repeat(12, 1fr) 20px;
+    background:#fff; z-index:4;
+    border-bottom:1px solid #000;
+    border-top:1px solid #000;
+}
+.bb{
+    position:absolute;
+    bottom:10px; left:10px; right:10px; height:20px;
+    display:grid;
+    grid-template-columns: 20px repeat(12, 1fr) 20px;
+    background:#fff; z-index:4;
+    border-top:1px solid #000;
+    border-bottom:1px solid #000;
+}
+/* Left & Right : 8 lettres A→H */
+.bl{
+    position:absolute;
+    top:30px; bottom:30px; left:10px; width:20px;
+    display:grid; grid-template-rows: repeat(8, 1fr);
+    background:#fff; z-index:4;
+    border-right:1px solid #000;
+    border-left:1px solid #000;
+}
+.br{
+    position:absolute;
+    top:30px; bottom:30px; right:10px; width:20px;
+    display:grid; grid-template-rows: repeat(8, 1fr);
+    background:#fff; z-index:4;
+    border-left:1px solid #000;
+    border-right:1px solid #000;
+}
+.bt div,.bb div{
+    border-right:1px solid #000;
+    text-align:center; font-size:10px; line-height:20px;
+    font-family: 'UniversalSans500', Arial, sans-serif;
+}
+.bt div:last-child,.bb div:last-child{ border-right:none; }
+.bl div,.br div{
+    border-bottom:1px solid #000;
+    display:flex; align-items:center; justify-content:center;
+    font-size:10px;
+    font-family: 'UniversalSans500', Arial, sans-serif;
+}
+.bl div:last-child,.br div:last-child{ border-bottom:none; }
 
+/* ── CORNERS ── */
+.corner{
+    position:absolute; width:21px; height:21px;
+    z-index:10; overflow:hidden;
+}
+.corner svg{ width:21px; height:21px; display:block; }
+.c-tl{ top:10px;  left:10px;  }
+.c-tr{ top:10px;  right:10px; }
+.c-bl{ bottom:10px; left:10px;  }
+.c-br{ bottom:10px; right:10px; }
 
+/* ── INNER FRAME ── */
+.frame{
+    position:absolute;
+    top:30px; left:30px; right:30px; bottom:30px;
+    border:1px solid #000;
+    z-index:3;
+    display:flex;
+    flex-direction:row;
+    overflow:hidden;
+}
 
-/* ==================== PAGE SETUP ==================== */
-.PageA4 {
-    width: 210mm;
-    height: 297mm;
-    margin: 0 auto;
+/* ── DRAWING ZONE 81% ── */
+.drawing-zone {
+    width: 81%;
+    height: 100%;
+    border-right: 1px solid #000;
+    min-height: 600px; /* or whatever fits your layout */
     background: white;
-    padding: 13px 10px 20px 19px;
-    box-shadow: 0 2px 10px rgba(0,0,0,0.1);
-    padding: 0; /* we will use specific header/footer padding */
-    box-sizing: border-box;
-    position: relative;
-    display: flex;
-    flex-direction: column;
 }
 
-/* ==================== HEADER ==================== */
-
-header {
-    height: 20mm;
-    padding: 13px 10px 20px 19px;
-}
-.logo {
-    font-family: 'TecniboDisplay', sans-serif;
-    font-size: 20px;
-    color: #000;
-    letter-spacing: 1.7px;
-}
-
-.header-right {
-    display: flex;
-    margin-left: 267.3px;
-    letter-spacing: 0.3px;
-}
-
-.text-muted-header {
-    font-family: 'UniversalSans500', sans-serif;
-    font-size: 8px;
-    padding-top: 5px;
-    padding-bottom: 5px;
-    color: #000;
-    font-weight: bold;
-}
-
-/* ==================== MAIN ==================== */
-main {
-    height: 267mm;
-    padding: 13px 10px 20px 19px;
-}
-
-.title {
-    font-family: 'TecniboDisplay', sans-serif;
-    font-size: 52px;
-    padding-top: 32px;
-    padding-bottom: 5px;
-    color: #000;
-    text-align: left;
-    text-transform: uppercase;
-}
-
-.product-photo {
-    width: 97%;
-    height: 315px;
-    display: flex;
-    flex-direction: column;
-    justify-content: center;
-    align-items: center;
-    margin-bottom: 15px;
-    color: #000;
-    font-size: 16px;
-}
-.table-row .col-6:first-child { width: 48.5%; margin-right: 15px; }
-.table-row .col-6:last-child { width: 48.5%; margin-left: -0.5px; }
-
-.text-muted {
-    font-family: 'UniversalSans500', sans-serif;
-    font-size: 8px;
-    padding-top: 5px;
-    padding-bottom: 5px;
-    color: #000;
-    font-weight: bold;
-    letter-spacing: 0.3px;
-}
-.border-half { border-top: 1px solid rgba(0,0,0,0.4); }
-
-.inner-row {
-  display: flex;
-  align-items: center;
-  padding: 5px 0;
-  border-top: 1px solid rgba(0,0,0,0.4);
-}
-.inner-row .left {
-  display: inline-block;
-  width: 192.5px;
-  font-family: 'UniversalSans500', sans-serif;
-  font-size: 8px;
-  letter-spacing: 0.3px;
-}
-
-.inner-row .right {
-  flex-grow: 1;
-  font-family: 'UniversalSans500', sans-serif;
-  font-size: 8px;
-  letter-spacing: 0.3px;
-  text-align: left;
-}
-
-.text-desc {
-    font-family: 'UniversalSans500', sans-serif;
-    font-size: 11.5px;
-    padding-top: 2px;
-    padding-bottom: 5px;
-    color: #000;
-    text-align: justify;
-    line-height: 1.4;
-    letter-spacing: 0.08px;
-}
-
-.padding { padding-top: 22px; }
-.padding-test { padding-top: 21px; letter-spacing: 0.3px; line-height: 1.7; text-align: justify;}
-
-.text-muted-dim { padding-top: 5px !important; }
-.text-muted-larg { padding-bottom: 4px !important; }
-.text-muted-per { padding-bottom: 4px !important; }
-
-/* ==================== FOOTER ==================== */
-.footer {
-    font-family: 'UniversalSans500', sans-serif;
-    padding: 13px 0px 0px 0px;
-    margin: 0px 18.5px 0px 18.5px;
-    height: 10mm;
-    border-top: 1px solid rgba(0,0,0,0.4);
-}
-
-.footer-content {
-    display: flex;
-    justify-content: flex-end;
-    align-items: center;
-}
-
-.numberPage { font-size: 8px; font-weight: 500; color: #666; }
-
-
-
-/* page 2 */
-
-.logo2 {
-    font-family: 'TecniboDisplay', sans-serif;
-    font-size: 30px;
-    margin-top : -3px;
-    color: #000;
-    letter-spacing: 2px;
-}
-.text-muted-header2 {
-    font-family: 'UniversalSans500', sans-serif;
-    font-size: 8px;
-    padding-top: 5px;
-    padding-bottom: 5px;
-    color: #000;
-    font-weight: bold;
-}
-.header-right2 {
-    display: flex;
-    margin-left: 212px;
-    letter-spacing: 0.3px;
-}
-
-.Premier {
-   height: 120mm;
-    /*height: 80mm;*/
-}
-.empty {
-    height: 36px;
-    margin: 0px 9.5px 0px 0px;
-    border-bottom: 1px solid rgba(0,0,0,0.4);
-}
-.DesFlec {
-    font-family: 'UniversalSans500', sans-serif;
-    padding-top: 6px;
-    font-size: 16px;
-}
-.Des-Flec {
-    margin-left: 0px;
-    padding-top: 4px;
-}
-.text-Des-Flec {
-    padding-bottom: 1px !important;
-}
-.text-desc-Des-Flec{
-    font-family: 'UniversalSans500', sans-serif;
-    font-size: 11.5px;
-    padding-top: 2px;
-    padding-bottom: 5px;
-    color: #000;
-    text-align: justify;
-    line-height: 1.4;
-    letter-spacing: 0.02px;
-}
-.padding-part1 {
-    padding-top: 17px;
-}
-.padding-premier {
-    padding-top: 65px;
-    margin: 0px 9.5px 0px 0px;
-    border-bottom: 1px solid rgba(0,0,0,0.4);
-}
-.padding-part2 {
-    padding-top: 19.5px;
-}
-
-/* page 3 */
-
-.main1 {
- height: 164.5mm;
- margin: 0px 9.5px 0px 0px;
-}
-.main2 {
-  height: 100mm;
-
-}
-.padding-Pa3 {
-    padding-top: 36px;
-}
-.logTitle {
-    font-family: 'TecniboDisplay', sans-serif;
-    font-size: 20px;
-    margin-top : 2px;
-    color: #000;
-    letter-spacing: 1px;
-}
-#Image {
-  width: 50%;
-  margin-right: 190px !important;
-  margin: 14px auto 0 auto;    /* auto left/right centers it */
-  height: 474px;
-  display: flex;
-  justify-content: center;
-  align-items: center;
-}
-
-.two-column-list {
-    padding: 64px 9.5px 0px 0px;
-}
-.text-muted_main2 {
-    font-family: 'UniversalSans500', sans-serif;
-    font-size: 8px;
-    padding-top: 10.5px;
-    padding-bottom: 10.5px;
-    color: #000;
-    letter-spacing: 0.3px;
-}
-.padding-premier_page3 {
-    padding-top: 150px;
-    margin: 0px 9.5px 0px 0px;
-    border-bottom: 1px solid rgba(0,0,0,0.4);
-}
-
-/* page 4 */
-
- .main4 {
-    height: calc(100vh - 60mm);
-    margin: 5mm 2mm 20mm 0mm;
-    box-sizing: border-box;
-    overflow: hidden;
-    }
-
-        /* Main row with two columns */
-    .main4 > .row.table-row {
-      display: flex;
-            gap: 10px;
-            height: 100%;
-            margin: 0;
-            padding: 0;
-        }
-
-        /* Left column: Horizontal sections (70%) */
-        .main4 .col-8 {
-            width: 68%;
-            display: flex;
-            flex-direction: column;
-            padding: 10px;
-            box-sizing: border-box;
-        }
-
-        /* Right column: Vertical section (30%) */
-        .main4 .col-4 {
-            width: 30%;
-            display: flex;
-            flex-direction: column;
-            padding: 10px;
-            box-sizing: border-box;
-        }
-
-        /* Column headers */
-        .DesFlecHV {
-            font-weight: bold;
-            text-align: center;
-            font-size: 16px;
-            padding: 12px;
-            margin: 0 0 10px 0;
-            flex-shrink: 0;
-        }
-
-        /* Horizontal rows */
-        .main4 .Horizontal1,
-        .main4 .Horizontal2 {
-            display: flex;
-            gap: 10px;
-            height: 240px;
-            margin: 0 0 10px 0;
-        }
-
-        .main4 .Horizontal3 {
-            display: flex;
-            justify-content: center;
-            gap: 10px;
-            height: 240px;
-            margin: 0;
-        }
-
-        /* Columns inside rows */
-        .main4 .Horizontal1 .col-6,
-        .main4 .Horizontal2 .col-6 {
-            flex: 1;
-            margin: 0;
-            padding: 0;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-        }
-
-        /* Third row - centered column */
-        .main4 .Horizontal3 .col-6 {
-            flex: 0 0 50%;
-            margin: 0;
-            padding: 0;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-        }
-
-        /* W3.CSS container reset */
-        .main4 .w3-container {
-            padding: 0;
-            margin: 0;
-            width: 100%;
-            height: 100%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-        }
-
-        /* W3.CSS card styling */
-        .main4 .w3-card-4 {
-            width: 100%;
-            max-width: 100%;
-            height: 100%;
-            display: flex;
-            flex-direction: column;
-            background-color: white;
-        }
-
-        /* Card images container */
-        .main4 .w3-card-4 > img {
-            flex: 1;
-            width: 100%;
-            height: calc(100% - 60px);
-            object-fit: contain;
-            display: block;
-        }
-
-        /* Card text container */
-        .main4 .w3-card-4 .w3-container {
-            flex-shrink: 0;
-            height: 50px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            padding: 8px;
-        }
-
-        .main4 .w3-card-4 .w3-container p {
-            margin: 5px;
-            font-size: 12px;
-            font-weight: 500;
-            text-align: center;
-            line-height: 1.2;
-        }
-
-.vertical {
-    flex: 1;
-    width: 100%;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    overflow: hidden;
-    padding: 0;
-}
-
-.vertical img {
+.drawing-zone .drawing-image {
     width: 100%;
     height: 100%;
-    object-fit: cover; /* fill entire box */
+    min-height: inherit;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.drawing-zone object {
+    width: 100%;
+    height: 100%;
     display: block;
+    border: none;
+}
+/* ── BLOCK 19% ── */
+.block{
+    width:19%; height:100%;
+    border-left:1px solid #000;
+    display:flex; flex-direction:column;
+    overflow:hidden; min-height:0;
 }
 
-        /* Override all Bootstrap defaults */
-        .main4 .row {
-            margin-left: 0;
-            margin-right: 0;
-        }
+/* ── TABLE ── */
+.table{
+    flex:0 0 62.5%; border-bottom:1px solid #000;
+    overflow:hidden; display:flex; flex-direction:column; min-height:0;
+}
+.table-header{
+    display:grid; grid-template-columns:20px 1fr 20px 1fr;
+    border-bottom:1px solid #000; background:#f0f0f0; flex-shrink:0;
+}
+.table-header span{
+    font-family: 'UniversalSans500', Arial, sans-serif;
+    font-size:8px; font-weight:bold;
+    text-align:center; padding:2px 1px;
+    border-right:1px solid #000; white-space:nowrap; overflow:hidden;
+}
+.table-header span:last-child{ border-right:none; }
+.table-body{ flex:1; overflow-y:auto; }
+.table-row{
+    display:grid;
+    grid-template-columns:20px 1fr 20px 1fr;
+    border-bottom:1px solid #ddd;
+    min-height:17px;
+}
+.table-row .num{
+    display:flex; align-items:center; justify-content:center;
+    font-family: 'UniversalSans500', Arial, sans-serif;
+    font-size:7px; font-weight:bold;
+    border-right:1px solid #ccc; padding:1px; flex-shrink:0;
+}
+.table-row .num span{
+    width:13px; height:13px; border:1px solid #000; border-radius:50%;
+    display:flex; align-items:center; justify-content:center; font-size:6px;
+}
+.table-row .desc{
+    font-family: 'UniversalSans500', Arial, sans-serif;
+    font-size:6px;
+    padding:2px 3px;
+    border-right:1px solid #ccc;
+    display:flex; align-items:center;
+    line-height:1.1; overflow:hidden;
+}
+.table-row .desc:last-child{ border-right:none; }
 
-        .main4 [class*="col-"] {
-            padding-left: 0;
-            padding-right: 0;
-        }
-
-        .main4 .gx-0 {
-            margin-left: 0;
-            margin-right: 0;
-        }
-
-        .main4 .gx-0 > * {
-            padding-left: 0;
-            padding-right: 0;
-        }
-
-        /* W3.CSS utilities */
-        .w3-center {
-            text-align: center;
-        }
-
-
-
-
-/* ==================== PRINT ==================== */
-/* ========== PRINT SETTINGS ENFORCEMENT ========== */
-@page {
-  size: A4 portrait;   /* matches Print > Layout: Portrait & Paper size: A4 */
-  margin: 0;           /* matches Print > Margins: None */
+/* ── FORMATEC ── */
+.formaTec{
+    flex:0 0 37.5%; display:flex; flex-direction:column;
+    overflow:hidden; min-height:0;
+}
+.formaTec .Description{
+    flex:0 0 25%; border-bottom:1px solid #000;
+    display:grid; grid-template-columns:repeat(3,1fr);
+    grid-template-rows:repeat(2,1fr);
+    gap:3px; padding:3px; overflow:hidden; background:#fff; min-height:0;
+}
+.Description .cell{
+    background:#fff; border:1px solid #000;
+    display:flex; flex-direction:column;
+    padding:2px 2px; gap:2px; overflow:hidden; min-height:0;
+}
+.Description .cell .cell-label{
+    font-family: 'UniversalSans500', Arial, sans-serif;
+    /* ✅ Rendu à 6.4px puis réduction ×0.5 → taille visuelle identique (3.2px)
+       mais glyphes nets à l'impression A0 (Chrome dégrade les polices < 4px).
+       NB : ce scale(0.5) RÉDUIT (downscale) → il rend + net, aucun souci. */
+    font-size:6.4px;
+    display:block;
+    width:200%;
+    transform:scale(0.5);
+    transform-origin:top left;
+    color:#000;
+    text-transform:uppercase; line-height:1; flex-shrink:0;
+}
+.Description .cell .cell-value{
+    font-family: 'UniversalSans500', Arial, sans-serif;
+    font-size:7px; font-weight:bold;
+    color:#000; line-height:1.2; overflow:hidden;
 }
 
+/* ── LOGO ── */
+.formaTec .logo{
+    flex:0 0 22%; border-bottom:1px solid #000;
+    display:grid; grid-template-columns:35% 65%;
+    overflow:hidden; min-height:0;
+}
+.logo .logo-brand{
+    display:flex; flex-direction:column;
+    align-items:flex-start; justify-content:center;
+    padding:4px 6px; gap:2px; overflow:hidden;
+}
+.logo .logo-brand .logo-name{
+    font-family:TecniboDisplay; font-size:13px;
+    letter-spacing:1.5px; color:#000; line-height:1;
+}
+.logo .logo-brand .logo-sub{
+    font-family: 'UniversalSans500', Arial, sans-serif;
+    font-size:9px; color:#000; margin-left:2px;
+}
+.logo .logo-accord{
+    display:flex; flex-direction:column; justify-content:space-between;
+    padding:4px 6px; gap:2px; overflow:hidden;
+}
+.logo .logo-accord .accord-title{
+    font-family: 'UniversalSans500', Arial, sans-serif;
+    font-size:6px; font-weight:bold;
+    letter-spacing:0.3px; color:#000; text-decoration:underline; flex-shrink:0;
+}
+.logo .logo-accord .accord-body{
+    font-family: 'UniversalSans500', Arial, sans-serif;
+    font-size:5px; color:#333;
+    line-height:1.3; flex:1; overflow:hidden;
+}
+.logo .logo-accord .accord-footer{
+    font-family: 'UniversalSans500', Arial, sans-serif;
+    font-size:5px; font-weight:bold; color:#000;
+    padding-top:2px; text-align:right; flex-shrink:0;
+}
+
+/* ── INFO ── */
+.formaTec .info{
+    flex:1; display:flex; flex-direction:column;
+    overflow:hidden; min-height:0;
+    font-family: 'UniversalSans500', Arial, sans-serif; font-size:5.5px;
+}
+.info-header{
+    flex-shrink:0; display:grid; grid-template-columns:45% 55%;
+    border-bottom:1px solid #000; overflow:hidden;
+}
+.info-header .col-left{
+    display:flex; flex-direction:column; gap:0.5px; padding:2px 3px;
+    overflow:hidden;
+}
+.info-header .col-right{
+    display:flex; flex-direction:column; gap:2px;
+    padding:2px 3px 2px 4px; overflow:hidden;
+}
+.info-header .field-label{
+    font-size:5px; font-weight:bold; color:#000;
+    text-transform:uppercase; line-height:1; flex-shrink:0;
+}
+.info-header .field-value{ font-size:5px; color:#000; line-height:1.2; }
+.info-header .field-group{
+    display:flex;
+    flex-direction:row;
+    align-items:baseline;
+    gap:4px;
+    border-bottom:1px solid #eee;
+    padding:1px 0;
+    flex-shrink:0;
+}
+.info-header .col-right .field-label{
+    white-space:nowrap;
+    flex-shrink:0;
+}
+.info-header .col-right .field-value{
+    overflow:hidden;
+    text-overflow:ellipsis;
+    white-space:nowrap;
+    flex:1;
+}
+.field-underline{ border-bottom:1px solid #000; height:5px; margin-top:1px; }
+
+.info-revisions{
+    flex:1; overflow:hidden; display:flex; flex-direction:column; min-height:0;
+}
+.rev-table{ width:100%; border-collapse:collapse; table-layout:fixed; }
+.rev-table th{
+    font-size:5px; font-weight:bold; text-align:left; padding:1px 2px;
+    border-bottom:1px solid #000; border-right:1px solid #ccc;
+    background:#f5f5f5; white-space:nowrap;
+}
+.rev-table th:last-child{ border-right:none; }
+.rev-table td{
+    font-size:5px; padding:1px 2px; border-bottom:1px solid #eee;
+    border-right:1px solid #eee; color:#444; height:8px;
+}
+.rev-table td:last-child{ border-right:none; }
+.rev-table tr:last-child td{ border-bottom:none; }
+.rev-table .col-ind{ width:8%; }
+.rev-table .col-date{ width:16%; }
+.rev-table .col-desc{ width:62%; }
+.rev-table .col-par{ width:14%; }
+
+.info-footer{
+    flex-shrink:0; border-top:1px solid #000;
+    display:grid; grid-template-columns:1fr 1fr 1fr;
+}
+.info-footer .foot-cell{
+    padding:2px 3px; border-right:1px solid #000;
+    display:flex; flex-direction:column; justify-content:space-around; overflow:hidden;
+}
+.info-footer .foot-cell:last-child{ border-right:none; }
+.foot-label{ font-size:4.5px; color:#888; text-transform:uppercase; line-height:1; }
+.foot-value{ font-size:5.5px; font-weight:bold; color:#000; line-height:1.2; }
+.foot-value.large{ font-size:8px; font-weight:bold; }
+.foot-row{
+    display:flex; align-items:baseline; gap:2px;
+    border-bottom:1px solid #eee; padding-bottom:1px;
+}
+
+/* ════════════════════════════════════════════════
+   PRINT
+   ════════════════════════════════════════════════ */
+@page{
+    margin:0;
+    size:auto;
+}
 @media print {
-  body {
-    -webkit-print-color-adjust: exact;
-    print-color-adjust: exact; /* keeps background colors/images */
-    background: #fff !important;
-  }
 
-  .PageA4, .document {
-    width: 210mm;
-    min-height: 297mm;
-    margin: 0 auto;
-    box-shadow: none !important;
-    page-break-after: always;
-  }
+    * {
+        -webkit-print-color-adjust: exact !important;
+        print-color-adjust: exact !important;
+        text-rendering: geometricPrecision !important;
+    }
 
-  /* Hide download button when printing */
-  .Telecharger {
-    display: none !important;
-  }
+    .print-toolbar { display: none !important; }
 
-  /* Ensure image pages don't create blank overflow */
-  .main4 {
-    overflow: hidden !important;
-    height: calc(100% - 40mm) !important;
-  }
+    html, body {
+        margin: 0 !important;
+        padding: 0 !important;
+        background: transparent !important;
+        display: block !important;
+        width: 0 !important;
+        height: 0 !important;
+        min-height: 0 !important;
+        overflow: visible !important;
+        gap: 0 !important;
+    }
 
-  /* ✅ PRINT ONLY FIRST 5 PAGES */
-  .PageA4:nth-child(n+7) {
-    display: none !important;
-  }
 
-  /* Prevent a blank page at the end */
-  .PageA4:nth-child(6) {
-    page-break-after: auto !important;
-  }
+    .sheet {
+        position: fixed !important;
+        top: 0 !important;
+        left: 0 !important;
+        width: 1400px !important;
+        height: 990px !important;
+        margin: 0 !important;
+        padding: 0 !important;
+        box-shadow: none !important;
+        background: #fff !important;
+        overflow: hidden !important;
+        transform-origin: top left !important;
+
+        /* ✅ CORRECTIF PIXELISATION A0
+           ─────────────────────────────────────────────────────────────
+           On a SUPPRIMÉ le « transform: scale() » qui était la cause de la
+           pixelisation. transform: scale() force Chrome à RASTÉRISER toute
+           la feuille à sa taille native (1×) puis à AGRANDIR le bitmap
+           obtenu → tout devient flou / pixelisé, y compris le SVG vectoriel
+           du plan ET le texte HTML (numéros, tableau, textes légaux).
+
+           On fait désormais TOUT l'agrandissement avec « zoom » (défini
+           ci-dessous par format). Contrairement à transform, zoom RECALCULE
+           la mise en page à la taille finale → texte et SVG sont re-rendus
+           VECTORIELLEMENT, donc parfaitement nets à toutes les échelles,
+           y compris l'impression A0.
+
+           Les dimensions papier sont STRICTEMENT identiques à avant :
+           l'ancien couple (zoom:2 × scale) a simplement été fusionné en un
+           seul zoom équivalent. */
+    }
+
+    /* A0 landscape : 1189×841 mm à 96 px/in = 4494×3178 px.
+       Feuille 1400×990 px → zoom 3.21  (= ancien 2 × 1.605, inchangé). */
+    html[data-format="A0"] .sheet {
+        zoom: 3.21 !important;
+    }
+
+    /* A4 landscape : 297×210 mm à 96 px/in = 1122×794 px.
+       Feuille 1400×990 px → zoom 0.801 (= ancien 2 × 0.4005, inchangé). */
+    html[data-format="A4"] .sheet {
+        zoom: 0.801 !important;
+    }
+
+    .table-body { overflow: hidden !important; }
 }
