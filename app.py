@@ -7,10 +7,13 @@ import base64
 import subprocess
 import json as _json
 import xml.etree.ElementTree as ET
+import requests
 from werkzeug.utils import secure_filename
 from datetime import datetime
 
-app = Flask(__name__)
+BASE_PATH = '/tools/PlanPrincipe'
+
+app = Flask(__name__, static_url_path=f'{BASE_PATH}/static')
 app.secret_key = "supersecretkey"
 
 DB_NAME       = "PLANDB.db"
@@ -43,11 +46,32 @@ PDFTOCAIRO_SCAN_DIRS = [
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 
-BASE_PATH = ''
+# Odoo session check (internal, same host as backend.tecnibo.com's /api/me)
+ODOO_ME_URL = "http://192.168.30.92:3001/api/me"
 
 
 def base_url():
     return BASE_PATH
+
+
+def is_authenticated():
+    """Validate the visitor's session_id cookie against the real Odoo session."""
+    session_id = request.cookies.get('session_id')
+    if not session_id:
+        return False
+    try:
+        r = requests.get(ODOO_ME_URL, cookies={'session_id': session_id}, timeout=5)
+        return bool(r.json().get('authenticated'))
+    except (requests.RequestException, ValueError):
+        return False
+
+
+@app.before_request
+def require_auth():
+    if request.path.startswith('/static/') or request.path.startswith(f'{BASE_PATH}/static/'):
+        return None
+    if not is_authenticated():
+        return redirect('https://backend.tecnibo.com/')
 
 
 def get_db():
