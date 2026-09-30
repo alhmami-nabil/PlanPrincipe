@@ -1,0 +1,18 @@
+# Blocks any commit or PR that puts data in git. Production data (PLANDB.db, static/uploads/)
+# lives only on the server; .gitignore is a convention, this check enforces it.
+name: No data files in git
+on: [push, pull_request]
+jobs:
+  no-data-files:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Refuse databases, uploads and .env files
+        run: |
+          bad=$(git ls-files | grep -Ei '\.(db|sqlite3?)(-journal|-wal|-shm)?$|^static/uploads/|(^|/)\.env(\..*)?$' || true)
+          if [ -n "$bad" ]; then
+            echo "::error::Data files must never be committed (production data lives only on the server):"
+            echo "$bad"
+            exit 1
+          fi
+          echo "OK: no database, uploads or .env files are tracked"

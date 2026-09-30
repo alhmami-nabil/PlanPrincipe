@@ -129,6 +129,15 @@ def init_db():
     conn.close()
 
 
+# Data-loss guard: in production (gunicorn) PLANDB.db must already exist. Creating a new empty one
+# would silently hide every plan (after a folder move, a bad deploy, a `git clean -x`...), so refuse
+# to start and say where to look. Local development may always create a fresh database; the deploy
+# watcher's throwaway test copy sets PLANPRINCIPE_ALLOW_NEW_DB=1 (it never sees the real data).
+if _UNDER_GUNICORN and not os.path.exists(DB_NAME) and os.environ.get('PLANPRINCIPE_ALLOW_NEW_DB') != '1':
+    raise RuntimeError(
+        f"[DB] {os.path.abspath(DB_NAME)} not found - refusing to start with an empty database. "
+        "Restore PLANDB.db from the backup (production data lives only on the server)."
+    )
 init_db()
 
 
