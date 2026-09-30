@@ -1,6 +1,7 @@
 from flask import Flask, render_template, request, redirect, jsonify, flash, Response
 import sqlite3
 import os
+import sys
 import re
 import shutil
 import base64
@@ -49,6 +50,17 @@ app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 # Odoo session check (internal, same host as backend.tecnibo.com's /api/me)
 ODOO_ME_URL = "http://192.168.30.92:3001/api/me"
 
+# Login gate: always ON in production (gunicorn), OFF for local development
+# (`flask run` / `python app.py`), so nobody has to comment it out to work locally.
+#   PLANPRINCIPE_AUTH=on  → turn it on locally, to test the gate itself
+#   nothing can turn it off under gunicorn (PLANPRINCIPE_AUTH=off is ignored there)
+_UNDER_GUNICORN = 'gunicorn' in sys.modules
+_AUTH_ENV = os.environ.get('PLANPRINCIPE_AUTH', '').strip().lower()
+AUTH_ENABLED = True if _UNDER_GUNICORN else _AUTH_ENV in ('on', '1', 'true', 'yes')
+if _UNDER_GUNICORN and _AUTH_ENV in ('off', '0', 'false', 'no'):
+    print('[AUTH] PLANPRINCIPE_AUTH=off ignored: the login gate is always on under gunicorn', flush=True)
+print(f"[AUTH] Odoo login gate {'ON' if AUTH_ENABLED else 'OFF (local development)'}", flush=True)
+
 
 def base_url():
     return BASE_PATH
@@ -68,6 +80,8 @@ def is_authenticated():
 
 @app.before_request
 def require_auth():
+    if not AUTH_ENABLED:
+        return None
     if request.path.startswith('/static/') or request.path.startswith(f'{BASE_PATH}/static/'):
         return None
     if not is_authenticated():
@@ -907,4 +921,4 @@ def remove_last_part(v):
 
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000, debug=True)
+    app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 5000)), debug=True)
