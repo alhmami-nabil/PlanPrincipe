@@ -36,8 +36,8 @@ let isDragging = false;
 let dragTarget = null;
 
 const getBasePath = () => {
-    return (typeof window !== 'undefined' && window.location.pathname.startsWith('/tools/fiches'))
-        ? '/tools/fiches' : '';
+    return (typeof window !== 'undefined' && window.location.pathname.startsWith('/tools/PlanPrincipe'))
+        ? '/tools/PlanPrincipe' : '';
 };
 
 // ============================================
@@ -279,14 +279,14 @@ function _setImagePreview(previewId, imagePath) {
     const img = document.getElementById(previewId);
     if (!img) return;
     if (imagePath) {
-        img.src = '/static/' + imagePath + '?t=' + Date.now();
+        img.src = getBasePath() + '/static/' + imagePath + '?t=' + Date.now();
         img.classList.remove('d-none', 'deleted');
         img.style.border = ''; img.style.opacity = '1';
         // ✅ Clic sur la preview → visionneuse plein écran dans la page
         img.style.cursor = 'zoom-in';
         img.title = '🔍 Cliquer pour agrandir (molette = zoom, Retour pour revenir)';
         img.onclick = function () {
-            _openSvgViewer('/static/' + imagePath);
+            _openSvgViewer(getBasePath() + '/static/' + imagePath);
         };
     } else {
         img.src = ''; img.classList.add('d-none');
@@ -478,7 +478,7 @@ function _openEditorFromSVG(svgPath, base) {
             _restoreSizeFromAnnotations(existing);
 
             // ✅ arrayBuffer + TextDecoder pour gérer correctement l'encodage UTF-8
-            return fetch(`/static/uploads/${editorFilename}?t=${Date.now()}`)
+            return fetch(`${getBasePath()}/static/uploads/${editorFilename}?t=${Date.now()}`)
                 .then(r => r.arrayBuffer())
                 .then(buf => {
                     if (loadingOverlay) loadingOverlay.classList.remove('active');

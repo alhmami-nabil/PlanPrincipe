@@ -18,3 +18,21 @@ temp.ps
 
 # Uploads folder (do not push to server)
 static/uploads/
+
+# Production data lives ONLY on the server (PLANDB.db + static/uploads/) — never commit it.
+# SQLite writes these side files next to the database while it works; they contain data too.
+*.db-journal
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+*.sqlite-journal
+
+# Local environments and secrets
+venv/
+.venv/
+.env
+.env.*
+
+# Deploy watcher state on the server
+.watch-state/

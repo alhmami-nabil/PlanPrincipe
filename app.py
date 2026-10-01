@@ -1,16 +1,20 @@
 from flask import Flask, render_template, request, redirect, jsonify, flash, Response
 import sqlite3
 import os
+import sys
 import re
 import shutil
 import base64
 import subprocess
 import json as _json
 import xml.etree.ElementTree as ET
+import requests
 from werkzeug.utils import secure_filename
 from datetime import datetime
 
-app = Flask(__name__)
+BASE_PATH = '/tools/PlanPrincipe'
+
+app = Flask(__name__, static_url_path=f'{BASE_PATH}/static')
 app.secret_key = "supersecretkey"
 
 DB_NAME       = "PLANDB.db"
@@ -43,11 +47,45 @@ PDFTOCAIRO_SCAN_DIRS = [
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 
-BASE_PATH = ''
+# Odoo session check (internal, same host as backend.tecnibo.com's /api/me)
+ODOO_ME_URL = "http://192.168.30.92:3001/api/me"
+
+# Login gate: always ON in production (gunicorn), OFF for local development
+# (`flask run` / `python app.py`), so nobody has to comment it out to work locally.
+#   PLANPRINCIPE_AUTH=on  → turn it on locally, to test the gate itself
+#   nothing can turn it off under gunicorn (PLANPRINCIPE_AUTH=off is ignored there)
+_UNDER_GUNICORN = 'gunicorn' in sys.modules
+_AUTH_ENV = os.environ.get('PLANPRINCIPE_AUTH', '').strip().lower()
+AUTH_ENABLED = True if _UNDER_GUNICORN else _AUTH_ENV in ('on', '1', 'true', 'yes')
+if _UNDER_GUNICORN and _AUTH_ENV in ('off', '0', 'false', 'no'):
+    print('[AUTH] PLANPRINCIPE_AUTH=off ignored: the login gate is always on under gunicorn', flush=True)
+print(f"[AUTH] Odoo login gate {'ON' if AUTH_ENABLED else 'OFF (local development)'}", flush=True)
 
 
 def base_url():
     return BASE_PATH
+
+
+def is_authenticated():
+    """Validate the visitor's session_id cookie against the real Odoo session."""
+    session_id = request.cookies.get('session_id')
+    if not session_id:
+        return False
+    try:
+        r = requests.get(ODOO_ME_URL, cookies={'session_id': session_id}, timeout=5)
+        return bool(r.json().get('authenticated'))
+    except (requests.RequestException, ValueError):
+        return False
+
+
+@app.before_request
+def require_auth():
+    if not AUTH_ENABLED:
+        return None
+    if request.path.startswith('/static/') or request.path.startswith(f'{BASE_PATH}/static/'):
+        return None
+    if not is_authenticated():
+        return redirect('https://backend.tecnibo.com/')
 
 
 def get_db():
@@ -91,6 +129,15 @@ def init_db():
     conn.close()
 
 
+# Data-loss guard: in production (gunicorn) PLANDB.db must already exist. Creating a new empty one
+# would silently hide every plan (after a folder move, a bad deploy, a `git clean -x`...), so refuse
+# to start and say where to look. Local development may always create a fresh database; the deploy
+# watcher's throwaway test copy sets PLANPRINCIPE_ALLOW_NEW_DB=1 (it never sees the real data).
+if _UNDER_GUNICORN and not os.path.exists(DB_NAME) and os.environ.get('PLANPRINCIPE_ALLOW_NEW_DB') != '1':
+    raise RuntimeError(
+        f"[DB] {os.path.abspath(DB_NAME)} not found - refusing to start with an empty database. "
+        "Restore PLANDB.db from the backup (production data lives only on the server)."
+    )
 init_db()
 
 
@@ -883,4 +930,4 @@ def remove_last_part(v):
 
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000, debug=True)
+    app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 5000)), debug=True)
